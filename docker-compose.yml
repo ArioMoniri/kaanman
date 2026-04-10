@@ -2,7 +2,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis-data:/data
     command: redis-server --appendonly yes
@@ -17,7 +17,7 @@ services:
       context: .
       dockerfile: Dockerfile.medical-mcp
     ports:
-      - "3001:3001"
+      - "3101:3001"
     environment:
       - PORT=3001
       - CACHE_ENABLED=true
@@ -33,7 +33,7 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     ports:
-      - "8000:8000"
+      - "8100:8000"
     env_file:
       - .env
     environment:
@@ -56,9 +56,9 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
     ports:
-      - "3000:3000"
+      - "3100:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_API_URL=http://localhost:8100
     depends_on:
       backend:
         condition: service_healthy

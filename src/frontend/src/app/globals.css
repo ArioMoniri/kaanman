@@ -2,6 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
+@import "katex/dist/katex.min.css";
+
 :root {
   --surface: #1F2023;
   --surface-light: #2A2A2E;
@@ -14,6 +16,10 @@ html, body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+*:focus-visible {
+  outline-offset: 0 !important;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
@@ -22,15 +28,26 @@ html, body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #444;
+  background-color: #444444;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background-color: #555555;
 }
 
-/* Textarea reset */
 textarea {
   scrollbar-width: thin;
   scrollbar-color: #444 transparent;
+}
+
+/* KaTeX overrides for dark theme */
+.katex-display {
+  margin: 0.5em 0 !important;
+}
+.katex {
+  color: #C4B5FD !important;
+  font-size: 0.95em !important;
+}
+.katex .mfrac .frac-line {
+  border-color: #8B5CF6 !important;
 }

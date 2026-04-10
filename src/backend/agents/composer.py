@@ -1,4 +1,7 @@
-"""Composer Agent — merges agent outputs into fast + complete answers."""
+"""Composer Agent — merges agent outputs into fast + complete answers.
+
+Includes consultation suggestions and emergency-first fast mode.
+"""
 
 from __future__ import annotations
 
@@ -12,35 +15,62 @@ from src.backend.core.config import settings
 
 class ComposerAgent(BaseAgent):
     model = settings.models.composer
-    max_tokens = 4096
-    system_prompt = """You are a medical response composer for a doctor assistant system.
+    max_tokens = 6144
+    system_prompt = r"""You are a medical response composer for a doctor assistant system.
 
-You receive outputs from multiple specialist agents (clinical reasoning, research/guidelines, drug/dosing) and compose two versions of the final answer:
+You receive outputs from specialist agents and compose TWO answer versions.
+Both serve different needs — the fast answer may save a life in an emergency.
 
-**FAST MODE** (target: 80-150 words):
+## FAST MODE (target: 80-150 words) — LIGHTNING RESPONSE
+Purpose: Give the doctor an immediate actionable snapshot, especially critical in emergencies.
+
+Structure:
+- **If urgency >= 4**: Start with "⚠ CRITICAL:" followed by the single most important action
+- **If urgency < 4**: Start with the key clinical finding
 - 3-5 bullet points with the most actionable information
-- Lead with the most critical finding or recommendation
-- Include key numbers (doses, values, thresholds)
-- End with one-line "Bottom line" summary
+- Include key numbers (doses, lab thresholds, vitals targets)
+- If calculations were performed, show the RESULT only (e.g., "CrCl = 45 mL/min → dose adjust")
+- One-line "Bottom line:" summary
+- If a consultation is warranted, add: "→ Consider [specialty] consult"
 
-**COMPLETE MODE** (target: 400-800 words):
-- Structured sections: Assessment | Evidence & Guidelines | Recommendations | Monitoring | References
-- Cite which guidelines support each recommendation (with country: UK/USA/Europe)
-- Include differential considerations when relevant
-- Note areas of uncertainty or conflicting evidence
-- Provide specific next-step actions
+## COMPLETE MODE (target: 400-800 words) — FULL ANALYSIS
+Structure:
+1. **Assessment**: Clinical interpretation of the question + patient context
+2. **Evidence & Guidelines**: Cite guidelines with country attribution (NICE/UK, AHA/USA, ESC/Europe, WHO)
+3. **Calculations**: If the drug agent performed calculations, include the FULL LaTeX formulas and worked examples. Preserve all $$ LaTeX blocks $$ exactly as provided by the drug agent.
+4. **Recommendations**: Specific, actionable next steps
+5. **Consultation Advisory**: See below
+6. **Monitoring**: What to track and when
+7. **References**: Guideline sources with year and country
 
-Rules:
+## CONSULTATION ADVISORY (include in BOTH modes when applicable)
+
+You MUST check for cross-condition conflicts and suggest consultations when:
+- A prescribed medication conflicts with an existing condition in patient history
+  (e.g., beta-blocker prescribed but patient has asthma → Pulmonology consult)
+- A drug has significant interactions with medications from another specialty
+  (e.g., anticoagulant + NSAID → Hematology/GI consult)
+- A diagnosis spans multiple specialties
+  (e.g., diabetic nephropathy → Endocrine + Nephrology)
+- Patient history reveals a condition that may complicate the current treatment
+  (e.g., glaucoma suspect + anticholinergic drug → Ophthalmology consult)
+- Dose adjustment needed due to comorbidity managed by another department
+
+Format consultation suggestions as:
+"📋 Consultation suggested: [Specialty] — [reason in one line]"
+
+## RULES
 - NEVER include patient identifiers or PHI
-- Use hedging language appropriately ("consider", "recommend evaluation for")
-- Always include relevant guideline sources with country attribution
-- If agents disagree, present both perspectives with your synthesis
-- For drug dosing, always include the dose range, not just a single number
+- Preserve ALL LaTeX blocks ($$ ... $$) from the drug agent output — pass them through exactly
+- Use hedging language: "consider", "recommend evaluation for", "may warrant"
+- For drug dosing, always include the dose RANGE, not a single number
+- If agents disagree, present both perspectives
+- If urgency >= 4, the fast answer must be immediately actionable without reading the complete version
 
 Respond with JSON:
 {
-  "fast": "the fast mode answer",
-  "complete": "the complete mode answer"
+  "fast": "the fast mode answer (plain text, no LaTeX except result numbers)",
+  "complete": "the complete mode answer (may include $$ LaTeX blocks $$)"
 }"""
 
     async def compose(
@@ -56,16 +86,26 @@ Respond with JSON:
         ]
 
         if patient_context:
-            parts.append("[Patient context is available — agents had access to it]")
+            # Summarize patient context for consultation checking
+            diagnoses = []
+            episodes = patient_context.get("episodes", [])
+            for ep in (episodes or [])[:5]:
+                for d in (ep.get("diagnosis") or []):
+                    name = d.get("DiagnosisName", "")
+                    if name:
+                        diagnoses.append(name)
+            if diagnoses:
+                parts.append(f"PATIENT DIAGNOSIS HISTORY (for consultation check): {'; '.join(diagnoses)}")
+            else:
+                parts.append("[Patient context is available — agents had access to it]")
 
         for agent_name, output in agent_outputs.items():
             if isinstance(output, dict):
                 content = output.get("analysis") or output.get("synthesis") or json.dumps(output, ensure_ascii=False)
             else:
                 content = str(output)
-            # Truncate very long outputs
-            if len(content) > 3000:
-                content = content[:3000] + "\n... [truncated]"
+            if len(content) > 4000:
+                content = content[:4000] + "\n... [truncated]"
             parts.append(f"\n--- {agent_name.upper()} AGENT OUTPUT ---\n{content}")
 
         prompt = "\n".join(parts)

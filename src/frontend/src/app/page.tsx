@@ -5,7 +5,7 @@ import { ChatInput } from "@/components/chat-input";
 import { MessageBubble } from "@/components/message-bubble";
 import { PatientBanner } from "@/components/patient-banner";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100";
 
 interface TrustScores {
   evidence_quality: number;
@@ -67,14 +67,10 @@ export default function Home() {
       const resp = await fetch(`${API_URL}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: text,
-          session_id: sessionId,
-        }),
+        body: JSON.stringify({ message: text, session_id: sessionId }),
       });
 
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-
       const data = await resp.json();
 
       if (!sessionId) setSessionId(data.session_id);
@@ -95,7 +91,7 @@ export default function Home() {
       const errorMsg: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: `Connection error: ${err instanceof Error ? err.message : "Unknown error"}. Make sure the backend is running.`,
+        content: `Connection error: ${err instanceof Error ? err.message : "Unknown error"}. Make sure the backend is running on ${API_URL}.`,
         timestamp: Date.now(),
       };
       setMessages((prev) => [...prev, errorMsg]);
@@ -104,28 +100,11 @@ export default function Home() {
     }
   };
 
-  const handlePatientIngest = async (cookiesJson: string) => {
-    try {
-      const resp = await fetch(`${API_URL}/api/patient/ingest`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cookies_json: cookiesJson }),
-      });
-      const data = await resp.json();
-      if (data.success) {
-        setSessionId(data.session_id);
-        setPatientSummary(data.patient_summary);
-      }
-    } catch {
-      // Silently fail — patient context is optional
-    }
-  };
-
   const handleClearPatient = async () => {
     if (sessionId) {
       await fetch(`${API_URL}/api/patient/clear?session_id=${sessionId}`, {
         method: "POST",
-      });
+      }).catch(() => {});
     }
     setPatientSummary(null);
     setSessionId(null);
@@ -169,7 +148,7 @@ export default function Home() {
             <p className="text-gray-500 max-w-md text-sm leading-relaxed">
               Medical AI assistant with multi-agent council.
               Ask any clinical question — get fast and complete answers
-              backed by the latest guidelines.
+              backed by the latest guidelines with LaTeX calculations.
             </p>
           </div>
         )}
@@ -188,11 +167,10 @@ export default function Home() {
             <span>Agents thinking...</span>
           </div>
         )}
-
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Chat Input */}
+      {/* Chat Input — 21st.dev design: just textarea + send */}
       <div className="px-6 pb-6 pt-2">
         <ChatInput onSend={handleSend} isLoading={isLoading} />
       </div>

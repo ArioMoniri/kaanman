@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { RadarChart } from "./radar-chart";
+import { LatexRenderer } from "./latex-renderer";
 
 interface TrustScores {
   evidence_quality: number;
@@ -31,8 +32,8 @@ interface Message {
   timestamp: number;
 }
 
-const COUNTRY_FLAGS: Record<string, string> = {
-  USA: "US", UK: "GB", Europe: "EU", Turkey: "TR", WHO: "UN",
+const COUNTRY_LABELS: Record<string, string> = {
+  USA: "USA", UK: "UK", Europe: "EU", Turkey: "TR", WHO: "WHO",
 };
 
 export function MessageBubble({ message }: { message: Message }) {
@@ -52,6 +53,8 @@ export function MessageBubble({ message }: { message: Message }) {
   const displayContent = hasDualMode
     ? mode === "fast" ? message.fast_answer! : message.complete_answer!
     : message.content;
+
+  const hasLatex = displayContent.includes("$$");
 
   return (
     <div className="flex flex-col gap-3 max-w-full">
@@ -82,9 +85,9 @@ export function MessageBubble({ message }: { message: Message }) {
           </div>
         )}
 
-        {/* Answer content */}
+        {/* Answer content — with LaTeX rendering */}
         <div className="text-sm text-gray-200 leading-relaxed whitespace-pre-wrap">
-          {displayContent}
+          {hasLatex ? <LatexRenderer content={displayContent} /> : displayContent}
         </div>
 
         {/* Guidelines used */}
@@ -97,7 +100,9 @@ export function MessageBubble({ message }: { message: Message }) {
                   key={i}
                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface text-xs text-gray-400 border border-border/30"
                 >
-                  <span className="text-[10px]">{COUNTRY_FLAGS[g.country] || g.country}</span>
+                  <span className="font-semibold text-accent/70">
+                    {COUNTRY_LABELS[g.country] || g.country}
+                  </span>
                   {g.source} {g.year && `(${g.year})`}
                 </span>
               ))}
