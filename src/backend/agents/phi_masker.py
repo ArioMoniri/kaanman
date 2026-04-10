@@ -20,11 +20,14 @@ from src.backend.core.config import settings
 # Regex-based pre-pass for common PHI patterns (runs before LLM)
 _PATTERNS = {
     "turkish_id": re.compile(r"\b\d{11}\b"),
-    "patient_id": re.compile(r"\b3025\s*6609\b"),
     "date_of_birth": re.compile(r"\b\d{2}\.\d{2}\.\d{4}\b"),
     "phone": re.compile(r"\b(?:\+90|0)\s*\d{3}\s*\d{3}\s*\d{2}\s*\d{2}\b"),
     "email": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),
 }
+
+# Protocol/patient IDs (7-9 digits) are NOT PHI — they are internal system IDs
+# used by the scraper. Do NOT mask them.
+_PROTOCOL_RE = re.compile(r"\b\d{7,9}\b")
 
 
 class PhiMasker(BaseAgent):
@@ -39,17 +42,18 @@ PHI includes:
 - Parent/family names → [FAMILY_MEMBER_1], [FAMILY_MEMBER_2]
 - Dates of birth → [DOB]
 - Visit dates → [DATE_1], [DATE_2], etc. (keep chronological order)
-- Patient IDs/MRNs → [PATIENT_ID]
 - Facility names → [FACILITY_1], [FACILITY_2]
 - Doctor names → [DOCTOR_1], [DOCTOR_2], etc.
 - Addresses, phone numbers, emails → [REDACTED]
-- Any other identifying information → [REDACTED]
+- 11-digit Turkish national ID numbers → [TC_ID]
 
-PRESERVE:
-- All medical content: diagnoses, ICD codes, symptoms, medications, lab values
+DO NOT MASK:
+- 7-9 digit protocol/patient IDs (e.g., 30256609, 73524705) — these are internal system identifiers
+- Medical content: diagnoses, ICD codes, symptoms, medications, lab values
+- Department/specialty names
 - Medical terminology and clinical descriptions
-- Chronological ordering of events (use relative timing: "Visit 1", "Visit 2")
-- Department/specialty names (these are not PHI)
+
+PRESERVE chronological ordering of events.
 
 Output valid JSON with:
 {
@@ -60,7 +64,6 @@ Output valid JSON with:
 
     def _regex_prepass(self, text: str) -> str:
         """Fast regex pass to catch obvious PHI before LLM."""
-        text = _PATTERNS["patient_id"].sub("[PATIENT_ID]", text)
         text = _PATTERNS["phone"].sub("[PHONE]", text)
         text = _PATTERNS["email"].sub("[EMAIL]", text)
         return text
@@ -76,33 +79,23 @@ Output valid JSON with:
             result = await self.call_json(prompt)
             return result
         except Exception:
-            # Fallback: return regex-masked version
             return {
                 "masked_record": json.loads(pre_masked),
                 "summary": "Patient data loaded (auto-masked via regex fallback).",
                 "phi_count": -1,
             }
 
-    async def check_output(self, text: str) -> str:
-        """Validate that a response contains no PHI. Returns cleaned text."""
-        # Fast regex check first
-        has_phi = False
+    def check_output(self, text: str) -> str:
+        """Validate that a response contains no PHI. Returns cleaned text.
+
+        Uses REGEX ONLY — no LLM call. This preserves LaTeX, markdown, and
+        all formatting exactly. The LLM-based masking is only used during
+        patient record ingest, not on output responses.
+        """
         for name, pattern in _PATTERNS.items():
-            if pattern.search(text):
-                has_phi = True
-                break
-
-        if not has_phi and len(text) < 100:
-            return text
-
-        prompt = f"""Check this medical response for any PHI/PII leakage.
-If you find any PHI, replace it with appropriate placeholders.
-If the text is clean, return it unchanged.
-
-Return ONLY the cleaned text, nothing else.
-
----
-{text}
----"""
-
-        return await self.call(prompt, temperature=0.0)
+            if name == "date_of_birth":
+                # Don't mask dates in clinical context — they could be
+                # guideline years, dosing schedules, etc.
+                continue
+            text = pattern.sub(f"[{name.upper()}]", text)
+        return text

@@ -51,7 +51,7 @@ async def chat(req: ChatRequest):
 
 @router.post("/api/chat/stream")
 async def chat_stream(req: ChatRequest):
-    """SSE streaming endpoint — sends agent status events then the final result."""
+    """SSE streaming endpoint — sends agent status, fast answer, then full result."""
     mem = SessionMemory(req.session_id)
     await mem.session_info()
     session_id = mem.session_id
@@ -83,7 +83,7 @@ async def chat_stream(req: ChatRequest):
         except Exception as e:
             await status_queue.put({"_type": "error", "message": str(e)})
         finally:
-            await status_queue.put(None)  # sentinel
+            await status_queue.put(None)
 
     async def event_generator():
         task = asyncio.create_task(run_orchestrator())
@@ -92,10 +92,13 @@ async def chat_stream(req: ChatRequest):
                 event = await status_queue.get()
                 if event is None:
                     break
-                if event.get("_type") == "result":
+                event_type = event.pop("_type", "status")
+                if event_type == "result":
                     yield f"event: result\ndata: {json.dumps(event['data'])}\n\n"
-                elif event.get("_type") == "error":
+                elif event_type == "error":
                     yield f"event: error\ndata: {json.dumps({'message': event['message']})}\n\n"
+                elif event_type == "fast_answer":
+                    yield f"event: fast_answer\ndata: {json.dumps(event)}\n\n"
                 else:
                     yield f"event: status\ndata: {json.dumps(event)}\n\n"
             yield f"event: done\ndata: {{}}\n\n"

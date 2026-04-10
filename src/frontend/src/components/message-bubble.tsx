@@ -55,14 +55,6 @@ interface Message {
   timestamp: number;
 }
 
-const COUNTRY_FLAGS: Record<string, string> = {
-  USA: "US",
-  UK: "GB",
-  Europe: "EU",
-  Turkey: "TR",
-  WHO: "UN",
-};
-
 const COUNTRY_LABELS: Record<string, string> = {
   USA: "USA",
   UK: "UK",
@@ -70,6 +62,36 @@ const COUNTRY_LABELS: Record<string, string> = {
   Turkey: "TR",
   WHO: "WHO",
 };
+
+/** Render markdown-like bold (**text**) and bullet points */
+function renderMarkdown(text: string): React.ReactNode[] {
+  const lines = text.split("\n");
+  const elements: React.ReactNode[] = [];
+
+  lines.forEach((line, lineIdx) => {
+    // Process bold markers within text
+    const parts = line.split(/(\*\*[^*]+\*\*)/g);
+    const rendered = parts.map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return (
+          <strong key={i} className="text-gray-100 font-semibold">
+            {part.slice(2, -2)}
+          </strong>
+        );
+      }
+      return part;
+    });
+
+    elements.push(
+      <React.Fragment key={lineIdx}>
+        {rendered}
+        {lineIdx < lines.length - 1 && "\n"}
+      </React.Fragment>
+    );
+  });
+
+  return elements;
+}
 
 export function MessageBubble({ message }: { message: Message }) {
   const [mode, setMode] = useState<"fast" | "complete">("fast");
@@ -93,8 +115,7 @@ export function MessageBubble({ message }: { message: Message }) {
     : message.content;
 
   const hasLatex = displayContent.includes("$$");
-  const hasCitations =
-    message.citations && message.citations.length > 0;
+  const hasCitations = message.citations && message.citations.length > 0;
   const hasGuidelines =
     message.guidelines_used && message.guidelines_used.length > 0;
 
@@ -132,7 +153,7 @@ export function MessageBubble({ message }: { message: Message }) {
           {hasLatex ? (
             <LatexRenderer content={displayContent} />
           ) : (
-            displayContent
+            renderMarkdown(displayContent)
           )}
         </div>
 
@@ -143,35 +164,54 @@ export function MessageBubble({ message }: { message: Message }) {
               Guidelines referenced:
             </p>
             <div className="flex flex-wrap gap-1.5">
-              {message.guidelines_used!.map((g, i) => (
-                <span
-                  key={i}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface text-xs text-gray-400 border border-border/30"
-                >
-                  <span className="font-semibold text-accent/70">
-                    {COUNTRY_LABELS[g.country] || g.country}
+              {message.guidelines_used!.map((g, i) => {
+                const badge = (
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface text-xs text-gray-400 border border-border/30 hover:border-accent/40 transition-colors"
+                  >
+                    <span className="font-semibold text-accent/70">
+                      {COUNTRY_LABELS[g.country] || g.country}
+                    </span>
+                    <span className="truncate max-w-[200px]">{g.source}</span>
+                    {g.year && (
+                      <span className="text-gray-500">({g.year})</span>
+                    )}
                   </span>
-                  <span className="truncate max-w-[200px]">
-                    {g.source}
-                  </span>
-                  {g.year && (
-                    <span className="text-gray-500">({g.year})</span>
-                  )}
-                </span>
-              ))}
+                );
+                if (g.url) {
+                  return (
+                    <a
+                      key={i}
+                      href={g.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="no-underline"
+                    >
+                      {badge}
+                    </a>
+                  );
+                }
+                return badge;
+              })}
             </div>
           </div>
         )}
 
-        {/* Citations */}
+        {/* Citations / References */}
         {hasCitations && (
           <div className="mt-2 pt-2 border-t border-border/20">
             <button
               onClick={() => setShowCitations(!showCitations)}
               className="text-[11px] text-accent/70 hover:text-accent transition-colors flex items-center gap-1"
             >
-              <span>{showCitations ? "Hide" : "Show"} citations ({message.citations!.length})</span>
-              <span className="text-[10px]">{showCitations ? "\u25B2" : "\u25BC"}</span>
+              <span>
+                {showCitations ? "Hide" : "Show"} references (
+                {message.citations!.length})
+              </span>
+              <span className="text-[10px]">
+                {showCitations ? "\u25B2" : "\u25BC"}
+              </span>
             </button>
             {showCitations && (
               <div className="mt-2 space-y-1.5">
@@ -183,11 +223,22 @@ export function MessageBubble({ message }: { message: Message }) {
                     <span className="text-accent/60 font-bold shrink-0">
                       [{c.index}]
                     </span>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-medium text-gray-300">
-                          {c.source}
-                        </span>
+                        {c.url ? (
+                          <a
+                            href={c.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-medium text-accent/80 hover:text-accent underline underline-offset-2"
+                          >
+                            {c.source}
+                          </a>
+                        ) : (
+                          <span className="font-medium text-gray-300">
+                            {c.source}
+                          </span>
+                        )}
                         <span className="px-1 py-0 rounded bg-accent/10 text-accent/70 text-[9px] font-semibold">
                           {COUNTRY_LABELS[c.country] || c.country}
                         </span>
@@ -200,7 +251,7 @@ export function MessageBubble({ message }: { message: Message }) {
                       </div>
                       {c.quote && (
                         <div className="text-gray-500 mt-0.5 italic text-[10px] line-clamp-2">
-                          {c.quote}
+                          &quot;{c.quote}&quot;
                         </div>
                       )}
                     </div>
@@ -246,7 +297,7 @@ export function MessageBubble({ message }: { message: Message }) {
         )}
       </div>
 
-      {/* Radar chart — always show when trust scores exist */}
+      {/* Radar chart */}
       {message.trust_scores && (
         <div className="ml-2">
           <RadarChart scores={message.trust_scores} />

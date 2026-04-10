@@ -77,6 +77,8 @@ export default function Home() {
   const [totalTokens, setTotalTokens] = useState({ input: 0, output: 0 });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Track the pending assistant message ID so we can update it
+  const pendingMsgIdRef = useRef<string | null>(null);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -114,6 +116,7 @@ export default function Home() {
     setAgentStatuses([]);
     setElapsed(0);
     setTotalTokens({ input: 0, output: 0 });
+    pendingMsgIdRef.current = null;
     startTimer();
 
     try {
@@ -139,13 +142,12 @@ export default function Home() {
         buffer = lines.pop() || "";
 
         let eventType = "";
-        let dataStr = "";
 
         for (const line of lines) {
           if (line.startsWith("event: ")) {
             eventType = line.slice(7).trim();
           } else if (line.startsWith("data: ")) {
-            dataStr = line.slice(6);
+            const dataStr = line.slice(6);
             try {
               const data = JSON.parse(dataStr);
 
@@ -169,18 +171,32 @@ export default function Home() {
                   return [...prev, item];
                 });
 
-                // Update token totals from done agents
                 if (data.status === "done" && data.tokens) {
                   setTotalTokens((prev) => ({
                     input: prev.input + (data.tokens.input_tokens || 0),
                     output: prev.output + (data.tokens.output_tokens || 0),
                   }));
                 }
+              } else if (eventType === "fast_answer") {
+                // Show the fast answer IMMEDIATELY — before complete answer
+                const msgId = crypto.randomUUID();
+                pendingMsgIdRef.current = msgId;
+                const fastMsg: Message = {
+                  id: msgId,
+                  role: "assistant",
+                  content: data.fast_answer,
+                  fast_answer: data.fast_answer,
+                  guidelines_used: data.guidelines_used,
+                  citations: data.citations,
+                  timestamp: Date.now(),
+                };
+                setMessages((prev) => [...prev, fastMsg]);
               } else if (eventType === "result") {
                 if (!sessionId) setSessionId(data.session_id);
 
-                const assistantMsg: Message = {
-                  id: crypto.randomUUID(),
+                // Update the existing fast-answer message with full data
+                const fullMsg: Message = {
+                  id: pendingMsgIdRef.current || crypto.randomUUID(),
                   role: "assistant",
                   content: data.fast_answer,
                   fast_answer: data.fast_answer,
@@ -195,7 +211,17 @@ export default function Home() {
                   total_output_tokens: data.total_output_tokens,
                   timestamp: Date.now(),
                 };
-                setMessages((prev) => [...prev, assistantMsg]);
+
+                setMessages((prev) => {
+                  if (pendingMsgIdRef.current) {
+                    // Replace the fast-answer-only message with the full result
+                    return prev.map((m) =>
+                      m.id === pendingMsgIdRef.current ? fullMsg : m
+                    );
+                  }
+                  return [...prev, fullMsg];
+                });
+                pendingMsgIdRef.current = null;
               } else if (eventType === "error") {
                 const errorMsg: Message = {
                   id: crypto.randomUUID(),
@@ -293,7 +319,7 @@ export default function Home() {
           />
         )}
 
-        {/* Simple loading indicator before first status arrives */}
+        {/* Simple loading before first status */}
         {isLoading && agentStatuses.length === 0 && (
           <div className="flex items-center gap-2 text-gray-500 text-sm pl-2">
             <div className="flex gap-1">

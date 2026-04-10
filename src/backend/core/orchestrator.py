@@ -1,15 +1,16 @@
 """CerebraLink Orchestrator — the agent council coordinator.
 
 Flow:
-  1. Router classifies the query -> picks which agents to activate
-  2. Store route decision in shared memory
-  3. Fan-out: activated agents run in parallel (clinical, research, drug)
-  4. Each agent stores its findings in both private + shared memory
-  5. Fan-in: Composer merges results into fast + complete answers
-  6. Trust Scorer evaluates confidence
-  7. PHI Output Checker validates no PHI leaked
+  1. Guardrail: Router classifies query (medical / greeting / off-topic)
+  2. If non-medical → return direct response, skip pipeline
+  3. If protocol ID detected → auto-fetch patient data from Cerebral Plus
+  4. Fan-out: activated agents run in parallel
+  5. Compose FAST answer → stream immediately
+  6. Compose COMPLETE answer
+  7. Trust scoring
+  8. PHI regex check (no LLM — preserves formatting)
 
-Supports SSE streaming of status events via on_status callback.
+Supports SSE streaming via on_status callback.
 """
 
 from __future__ import annotations
@@ -25,24 +26,26 @@ from src.backend.agents.drug import DrugAgent
 from src.backend.agents.composer import ComposerAgent
 from src.backend.agents.trust import TrustScorerAgent
 from src.backend.agents.phi_masker import PhiMasker
-from src.backend.core.memory import AgentMemory, SharedMemory
+from src.backend.core.memory import AgentMemory, SharedMemory, SessionMemory
 from src.backend.api.schemas import TrustScores, GuidelineRef, Citation, AgentTiming
+from src.backend.tools.cerebral import auto_fetch_patient
 
 StatusCallback = Callable[[dict[str, Any]], Awaitable[None]] | None
 
 AGENT_LABELS = {
     "router": "Classifying query...",
+    "patient_fetch": "Fetching patient data...",
     "clinical": "Deep clinical analysis...",
     "research": "Searching latest guidelines...",
     "drug": "Analyzing drug interactions & dosing...",
-    "composer": "Composing response...",
+    "composer_fast": "Composing fast answer...",
+    "composer_complete": "Composing complete analysis...",
     "trust_scorer": "Evaluating confidence...",
-    "phi_check": "Checking for PHI leaks...",
+    "phi_check": "Safety check...",
 }
 
 
 class OrchestratorResult:
-    """Intermediate container before ChatResponse serialization."""
     def __init__(self):
         self.fast_answer: str = ""
         self.complete_answer: str = ""
@@ -88,6 +91,13 @@ class Orchestrator:
         if on_status:
             await on_status(event)
 
+    def _timing(self, agent: str, t0: float, usage: dict) -> AgentTiming:
+        return AgentTiming(
+            agent=agent, time_ms=int((time.monotonic() - t0) * 1000),
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+        )
+
     async def run(
         self,
         message: str,
@@ -100,51 +110,91 @@ class Orchestrator:
         result = OrchestratorResult()
         shared = SharedMemory(session_id)
 
-        # 1. Route the query
+        # ── 1. Route & guardrail ──
         await self._emit(on_status, {
             "agent": "router", "status": "running",
             "message": AGENT_LABELS["router"], "phase": "routing",
         })
         t0 = time.monotonic()
         route: RouteDecision = await self.router.classify(message, patient_context)
-        t_router = int((time.monotonic() - t0) * 1000)
-        usage_router = self.router.last_usage
+        timing_router = self._timing("router", t0, self.router.last_usage)
         result.agents_used.append("router")
-        result.agent_timings.append(AgentTiming(
-            agent="router", time_ms=t_router,
-            input_tokens=usage_router["input_tokens"],
-            output_tokens=usage_router["output_tokens"],
-        ))
+        result.agent_timings.append(timing_router)
         await self._emit(on_status, {
-            "agent": "router", "status": "done", "time_ms": t_router,
-            "tokens": usage_router,
+            "agent": "router", "status": "done", "time_ms": timing_router.time_ms,
+            "tokens": self.router.last_usage,
             "message": f"Route: {route.category} (urgency {route.urgency}/5)",
         })
 
+        # ── Non-medical queries: respond directly ──
+        if not route.is_medical:
+            result.fast_answer = route.direct_response
+            result.complete_answer = route.direct_response
+            result.total_time_ms = int((time.monotonic() - t_start) * 1000)
+            result.total_input_tokens = timing_router.input_tokens
+            result.total_output_tokens = timing_router.output_tokens
+            await self._emit(on_status, {
+                "_type": "fast_answer",
+                "fast_answer": result.fast_answer,
+                "guidelines_used": [],
+                "citations": [],
+            })
+            return result
+
         await shared.put("route", {
-            "category": route.category,
-            "urgency": route.urgency,
+            "category": route.category, "urgency": route.urgency,
             "guideline_countries": route.guideline_countries,
         })
 
-        # 2. Fan-out: run activated agents in parallel
-        agent_map: dict[str, tuple[str, Any]] = {}
+        # ── 2. Auto-fetch patient if protocol ID detected ──
+        if route.detected_protocol_id and not patient_context:
+            await self._emit(on_status, {
+                "agent": "patient_fetch", "status": "running",
+                "message": f"Fetching patient {route.detected_protocol_id}...",
+                "phase": "patient_fetch",
+            })
+            t0 = time.monotonic()
+            try:
+                raw_patient = await auto_fetch_patient(route.detected_protocol_id)
+                masked = await self.phi_checker.mask_patient_record(raw_patient)
+                patient_context = masked.get("masked_record", raw_patient)
+
+                # Store in session memory
+                mem = SessionMemory(session_id)
+                await mem.set_patient_context(patient_context)
+
+                t_fetch = int((time.monotonic() - t0) * 1000)
+                result.agents_used.append("patient_fetch")
+                result.agent_timings.append(AgentTiming(
+                    agent="patient_fetch", time_ms=t_fetch,
+                ))
+                await self._emit(on_status, {
+                    "agent": "patient_fetch", "status": "done",
+                    "time_ms": t_fetch,
+                    "message": f"Patient data loaded & PHI-masked",
+                })
+            except Exception as e:
+                t_fetch = int((time.monotonic() - t0) * 1000)
+                await self._emit(on_status, {
+                    "agent": "patient_fetch", "status": "error",
+                    "time_ms": t_fetch,
+                    "message": f"Patient fetch failed: {e}",
+                })
+                # Continue without patient context
+
+        # ── 3. Fan-out: parallel agents ──
+        agent_map: dict[str, tuple] = {}
 
         if route.needs_clinical:
-            agent_map["clinical"] = ("clinical", self.clinical,
-                                     self.clinical.analyze, (message, patient_context, history))
+            agent_map["clinical"] = (self.clinical, self.clinical.analyze, (message, patient_context, history))
         if route.needs_research:
-            agent_map["research"] = ("research", self.research,
-                                     self.research.search, (message, route.guideline_countries))
+            agent_map["research"] = (self.research, self.research.search, (message, route.guideline_countries))
         if route.needs_drug:
-            agent_map["drug"] = ("drug", self.drug,
-                                 self.drug.analyze, (message, patient_context))
+            agent_map["drug"] = (self.drug, self.drug.analyze, (message, patient_context))
 
         if not agent_map:
-            agent_map["clinical"] = ("clinical", self.clinical,
-                                     self.clinical.analyze, (message, patient_context, history))
+            agent_map["clinical"] = (self.clinical, self.clinical.analyze, (message, patient_context, history))
 
-        # Emit running status for all parallel agents
         for name in agent_map:
             await self._emit(on_status, {
                 "agent": name, "status": "running",
@@ -173,7 +223,7 @@ class Orchestrator:
             return name, output, elapsed, usage
 
         tasks = [
-            asyncio.create_task(_timed_agent(name, info[1], info[2], info[3]))
+            asyncio.create_task(_timed_agent(name, info[0], info[1], info[2]))
             for name, info in agent_map.items()
         ]
 
@@ -188,103 +238,110 @@ class Orchestrator:
                     input_tokens=usage["input_tokens"],
                     output_tokens=usage["output_tokens"],
                 ))
-            except Exception as e:
-                result.agents_used.append(f"error")
+            except Exception:
+                pass
 
-        # 3. Extract guidelines from research output
+        # ── 4. Extract citations from research output ──
         if "research" in agent_outputs and isinstance(agent_outputs["research"], dict):
             for i, g in enumerate(agent_outputs["research"].get("guidelines", []), 1):
                 try:
                     result.guidelines_used.append(GuidelineRef(**{
-                        k: g[k] for k in ("title", "source", "country", "year", "url")
-                        if k in g
+                        k: g[k] for k in ("title", "source", "country", "year", "url") if k in g
                     }))
                     result.citations.append(Citation(
-                        index=i,
-                        title=g.get("title", ""),
-                        source=g.get("source", ""),
-                        country=g.get("country", ""),
-                        year=g.get("year"),
-                        url=g.get("url"),
+                        index=i, title=g.get("title", ""),
+                        source=g.get("source", ""), country=g.get("country", ""),
+                        year=g.get("year"), url=g.get("url"),
                         quote=g.get("key_recommendation", ""),
                     ))
                 except Exception:
                     pass
 
-        # 4. Compose fast + complete answers
+        # ── 5. Compose FAST answer → stream immediately ──
         await self._emit(on_status, {
-            "agent": "composer", "status": "running",
-            "message": AGENT_LABELS["composer"], "phase": "composing",
+            "agent": "composer_fast", "status": "running",
+            "message": AGENT_LABELS["composer_fast"], "phase": "composing",
         })
         t0 = time.monotonic()
-        composed = await self.composer.compose(
-            query=message,
-            agent_outputs=agent_outputs,
-            patient_context=patient_context,
-            route=route,
+        fast_raw = await self.composer.compose_fast(
+            query=message, agent_outputs=agent_outputs,
+            patient_context=patient_context, route=route,
+            citations=result.citations,
+        )
+        t_fast = int((time.monotonic() - t0) * 1000)
+        usage_fast = self.composer.last_usage
+        result.fast_answer = self.phi_checker.check_output(fast_raw)
+        result.agents_used.append("composer_fast")
+        result.agent_timings.append(AgentTiming(
+            agent="composer_fast", time_ms=t_fast,
+            input_tokens=usage_fast["input_tokens"],
+            output_tokens=usage_fast["output_tokens"],
+        ))
+
+        # Stream the fast answer to the client immediately
+        await self._emit(on_status, {
+            "agent": "composer_fast", "status": "done", "time_ms": t_fast,
+            "tokens": usage_fast,
+        })
+        await self._emit(on_status, {
+            "_type": "fast_answer",
+            "fast_answer": result.fast_answer,
+            "guidelines_used": [g.model_dump() for g in result.guidelines_used],
+            "citations": [c.model_dump() for c in result.citations],
+        })
+
+        # ── 6. Compose COMPLETE answer ──
+        await self._emit(on_status, {
+            "agent": "composer_complete", "status": "running",
+            "message": AGENT_LABELS["composer_complete"], "phase": "composing",
+        })
+        t0 = time.monotonic()
+        complete_raw = await self.composer.compose_complete(
+            query=message, agent_outputs=agent_outputs,
+            patient_context=patient_context, route=route,
             citations=result.citations,
         )
         t_comp = int((time.monotonic() - t0) * 1000)
         usage_comp = self.composer.last_usage
-        result.agents_used.append("composer")
+        result.complete_answer = self.phi_checker.check_output(complete_raw)
+        result.agents_used.append("composer_complete")
         result.agent_timings.append(AgentTiming(
-            agent="composer", time_ms=t_comp,
+            agent="composer_complete", time_ms=t_comp,
             input_tokens=usage_comp["input_tokens"],
             output_tokens=usage_comp["output_tokens"],
         ))
         await self._emit(on_status, {
-            "agent": "composer", "status": "done", "time_ms": t_comp,
+            "agent": "composer_complete", "status": "done", "time_ms": t_comp,
             "tokens": usage_comp,
         })
 
-        # 5. Trust scoring
+        # ── 7. Trust scoring ──
         await self._emit(on_status, {
             "agent": "trust_scorer", "status": "running",
             "message": AGENT_LABELS["trust_scorer"], "phase": "scoring",
         })
         t0 = time.monotonic()
         scores = await self.trust_scorer.score(
-            query=message,
-            fast_answer=composed["fast"],
-            complete_answer=composed["complete"],
+            query=message, fast_answer=result.fast_answer,
+            complete_answer=result.complete_answer,
             agent_outputs=agent_outputs,
         )
-        t_trust = int((time.monotonic() - t0) * 1000)
-        usage_trust = self.trust_scorer.last_usage
+        timing_trust = self._timing("trust_scorer", t0, self.trust_scorer.last_usage)
         result.trust_scores = TrustScores(**scores)
         result.agents_used.append("trust_scorer")
-        result.agent_timings.append(AgentTiming(
-            agent="trust_scorer", time_ms=t_trust,
-            input_tokens=usage_trust["input_tokens"],
-            output_tokens=usage_trust["output_tokens"],
-        ))
+        result.agent_timings.append(timing_trust)
         await self._emit(on_status, {
-            "agent": "trust_scorer", "status": "done", "time_ms": t_trust,
-            "tokens": usage_trust,
+            "agent": "trust_scorer", "status": "done",
+            "time_ms": timing_trust.time_ms, "tokens": self.trust_scorer.last_usage,
         })
 
-        # 6. PHI output check
-        await self._emit(on_status, {
-            "agent": "phi_check", "status": "running",
-            "message": AGENT_LABELS["phi_check"], "phase": "safety",
-        })
-        t0 = time.monotonic()
-        result.fast_answer = await self.phi_checker.check_output(composed["fast"])
-        result.complete_answer = await self.phi_checker.check_output(composed["complete"])
-        t_phi = int((time.monotonic() - t0) * 1000)
-        await self._emit(on_status, {
-            "agent": "phi_check", "status": "done", "time_ms": t_phi,
-        })
-
-        # Totals
+        # ── Totals ──
         result.total_time_ms = int((time.monotonic() - t_start) * 1000)
         result.total_input_tokens = sum(t.input_tokens for t in result.agent_timings)
         result.total_output_tokens = sum(t.output_tokens for t in result.agent_timings)
 
-        # 7. Store final result in shared memory
         await shared.put("last_result", {
-            "query": message,
-            "agents_used": result.agents_used,
+            "query": message, "agents_used": result.agents_used,
             "trust_avg": sum(scores.values()) // len(scores) if scores else 0,
         })
 

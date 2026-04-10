@@ -18,30 +18,36 @@ interface StatusBarProps {
 
 const AGENT_ICONS: Record<string, string> = {
   router: "R",
+  patient_fetch: "P",
   clinical: "C",
   research: "S",
   drug: "D",
-  composer: "W",
+  composer_fast: "F",
+  composer_complete: "W",
   trust_scorer: "T",
-  phi_check: "P",
+  phi_check: "V",
 };
 
 const AGENT_NAMES: Record<string, string> = {
   router: "Router",
+  patient_fetch: "Patient",
   clinical: "Clinical",
   research: "Research",
   drug: "Drug",
-  composer: "Composer",
+  composer_fast: "Fast",
+  composer_complete: "Complete",
   trust_scorer: "Trust",
   phi_check: "PHI Check",
 };
 
 const PHASE_ORDER = [
   "router",
+  "patient_fetch",
   "clinical",
   "research",
   "drug",
-  "composer",
+  "composer_fast",
+  "composer_complete",
   "trust_scorer",
   "phi_check",
 ];

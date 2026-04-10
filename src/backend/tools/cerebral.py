@@ -12,16 +12,11 @@ from pathlib import Path
 from typing import Any
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
+COOKIES_DIR = Path(__file__).resolve().parents[3] / "cookies"
 
 
 async def ingest_cookies_json(cookies_json_str: str) -> dict[str, Any]:
-    """Full pipeline: cookies JSON string → patient record dict.
-
-    1. Parse cookies JSON → cookie string (via cerebral_cookie_from_json.py)
-    2. Extract patient ID from cookies or use default
-    3. Fetch patient record (via cerebral_fetch.py)
-    """
-    # Step 1: Convert cookies JSON to cookie string
+    """Full pipeline: cookies JSON string → cookie string."""
     cookie_script = SCRIPTS_DIR / "cerebral_cookie_from_json.py"
     if not cookie_script.exists():
         raise FileNotFoundError(f"Cookie script not found: {cookie_script}")
@@ -61,6 +56,28 @@ async def fetch_patient(patient_id: str, cookie_string: str) -> dict[str, Any]:
         raise RuntimeError(f"Patient fetch failed: {stderr_lines[-1] if stderr_lines else 'unknown error'}")
 
     return json.loads(proc.stdout)
+
+
+async def auto_fetch_patient(protocol_id: str) -> dict[str, Any]:
+    """Auto-fetch patient data using cookies.json from the cookies/ folder.
+
+    This is the main entry point when a doctor types a protocol number
+    in the chat (e.g., "73524705 bu hastaya atenolol baslayabilir miyim").
+    """
+    cookies_file = COOKIES_DIR / "cookies.json"
+    if not cookies_file.exists():
+        raise FileNotFoundError(
+            f"No cookies.json found in {COOKIES_DIR}. "
+            "Export cookies from your browser and place them in the cookies/ folder."
+        )
+
+    with open(cookies_file, "r", encoding="utf-8") as f:
+        cookies_json = f.read()
+
+    result = await ingest_cookies_json(cookies_json)
+    cookie_string = result["cookie_string"]
+
+    return await fetch_patient(protocol_id, cookie_string)
 
 
 async def load_patient_from_file(path: str) -> dict[str, Any]:
