@@ -8,7 +8,7 @@ on:
 
 jobs:
   frontend:
-    name: Frontend Build & Lint
+    name: Frontend Build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -33,7 +33,7 @@ jobs:
         run: npm run build
 
   backend:
-    name: Backend Lint & Import Check
+    name: Backend Import Check
     runs-on: ubuntu-latest
 
     steps:
@@ -49,36 +49,37 @@ jobs:
         run: pip install -r src/backend/requirements.txt
 
       - name: Check imports
-        run: python -c "
+        run: |
+          python3 << 'PYEOF'
           import importlib, sys
           modules = [
-            'src.backend.api.app',
-            'src.backend.api.schemas',
-            'src.backend.api.routes',
-            'src.backend.agents.router',
-            'src.backend.agents.clinical',
-            'src.backend.agents.research',
-            'src.backend.agents.drug',
-            'src.backend.agents.composer',
-            'src.backend.agents.trust',
-            'src.backend.agents.decision_tree',
-            'src.backend.agents.phi_masker',
-            'src.backend.core.orchestrator',
-            'src.backend.core.memory',
+              "src.backend.api.app",
+              "src.backend.api.schemas",
+              "src.backend.api.routes",
+              "src.backend.agents.router",
+              "src.backend.agents.clinical",
+              "src.backend.agents.research",
+              "src.backend.agents.drug",
+              "src.backend.agents.composer",
+              "src.backend.agents.trust",
+              "src.backend.agents.decision_tree",
+              "src.backend.agents.phi_masker",
+              "src.backend.core.orchestrator",
+              "src.backend.core.memory",
           ]
           failed = []
           for mod in modules:
-            try:
-              importlib.import_module(mod)
-            except Exception as e:
-              failed.append(f'{mod}: {e}')
+              try:
+                  importlib.import_module(mod)
+              except Exception as e:
+                  failed.append("{}: {}".format(mod, e))
           if failed:
-            print('Import failures:')
-            for f in failed:
-              print(f'  {f}')
-            sys.exit(1)
-          print(f'All {len(modules)} modules imported successfully')
-          "
+              print("Import failures:")
+              for f in failed:
+                  print("  " + f)
+              sys.exit(1)
+          print("All {} modules imported successfully".format(len(modules)))
+          PYEOF
 
   docker:
     name: Docker Compose Validation
