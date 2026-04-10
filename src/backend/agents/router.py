@@ -30,6 +30,8 @@ class RouteDecision:
     direct_response: str = ""
     detected_protocol_id: str = ""
     language: str = "en"
+    needs_decision_tree: bool = False
+    priority_country: str = ""
 
 
 class RouterAgent(BaseAgent):
@@ -65,12 +67,21 @@ Classify into one of:
 - EMERGENCY: urgent/critical findings
 - GENERAL: general medical questions
 
-## STEP 3: DETECT LANGUAGE
+## STEP 3: DETECT LANGUAGE & PRIORITY COUNTRY
 
-Detect the language of the input:
-- "tr" for Turkish
-- "en" for English
-- "mixed" for mixed Turkish/English
+Detect the language and map to priority country:
+- "tr" → priority_country: "Turkey"
+- "en" → priority_country: "USA"
+- "de" → priority_country: "Europe"
+- "fr" → priority_country: "Europe"
+
+## STEP 4: DECISION TREE
+
+Set needs_decision_tree=true when the query involves:
+- Treatment selection with multiple pathways (e.g., "can I start drug X" → contraindication checking flow)
+- Diagnostic workup with branching logic
+- Algorithm-based clinical decisions
+- Drug selection with dose adjustments based on conditions
 
 ## RESPOND WITH ONLY JSON:
 {
@@ -81,8 +92,10 @@ Detect the language of the input:
   "needs_research": false,
   "needs_drug": false,
   "needs_patient_context": false,
-  "guideline_countries": ["USA", "Europe"],
+  "needs_decision_tree": false,
+  "guideline_countries": ["Turkey", "Europe", "USA"],
   "language": "tr",
+  "priority_country": "Turkey",
   "direct_response": "",
   "reasoning": "brief one-line reason"
 }"""

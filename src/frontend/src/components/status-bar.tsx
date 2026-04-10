@@ -24,7 +24,8 @@ const AGENT_ICONS: Record<string, string> = {
   drug: "D",
   composer_fast: "F",
   composer_complete: "W",
-  trust_scorer: "T",
+  decision_tree: "T",
+  trust_scorer: "Q",
   phi_check: "V",
 };
 
@@ -36,6 +37,7 @@ const AGENT_NAMES: Record<string, string> = {
   drug: "Drug",
   composer_fast: "Fast",
   composer_complete: "Complete",
+  decision_tree: "DecTree",
   trust_scorer: "Trust",
   phi_check: "PHI Check",
 };
@@ -48,6 +50,7 @@ const PHASE_ORDER = [
   "drug",
   "composer_fast",
   "composer_complete",
+  "decision_tree",
   "trust_scorer",
   "phi_check",
 ];

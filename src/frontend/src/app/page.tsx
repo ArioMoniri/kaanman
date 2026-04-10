@@ -2,62 +2,14 @@
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { ChatInput } from "@/components/chat-input";
-import { MessageBubble } from "@/components/message-bubble";
+import { MessageBubble, type Message } from "@/components/message-bubble";
 import { PatientBanner } from "@/components/patient-banner";
 import { StatusBar } from "@/components/status-bar";
+import { ReferenceSidebar } from "@/components/reference-sidebar";
+import { KnowledgeGraph } from "@/components/knowledge-graph";
+import { DecisionTreeViewer } from "@/components/decision-tree-viewer";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100";
-
-interface TrustScores {
-  evidence_quality: number;
-  guideline_alignment: number;
-  clinical_relevance: number;
-  safety_check: number;
-  completeness: number;
-  source_recency: number;
-}
-
-interface Guideline {
-  title: string;
-  source: string;
-  country: string;
-  year?: number;
-  url?: string;
-}
-
-interface Citation {
-  index: number;
-  title: string;
-  source: string;
-  country: string;
-  year?: number;
-  url?: string;
-  quote: string;
-}
-
-interface AgentTiming {
-  agent: string;
-  time_ms: number;
-  input_tokens: number;
-  output_tokens: number;
-}
-
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  fast_answer?: string;
-  complete_answer?: string;
-  trust_scores?: TrustScores;
-  guidelines_used?: Guideline[];
-  citations?: Citation[];
-  agents_used?: string[];
-  agent_timings?: AgentTiming[];
-  total_time_ms?: number;
-  total_input_tokens?: number;
-  total_output_tokens?: number;
-  timestamp: number;
-}
 
 interface AgentStatusItem {
   agent: string;
@@ -67,17 +19,34 @@ interface AgentStatusItem {
   tokens?: { input_tokens: number; output_tokens: number };
 }
 
+interface DecisionTreeData {
+  title: string;
+  nodes: { id: string; type?: string; data: Record<string, unknown>; position: Record<string, unknown> }[];
+  edges: { id: string; source: string; target: string; label?: string }[];
+}
+
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [patientSummary, setPatientSummary] = useState<string | null>(null);
+  const [patientData, setPatientData] = useState<Record<string, unknown> | null>(null);
   const [agentStatuses, setAgentStatuses] = useState<AgentStatusItem[]>([]);
   const [elapsed, setElapsed] = useState(0);
   const [totalTokens, setTotalTokens] = useState({ input: 0, output: 0 });
+
+  // Sidebar & modal state
+  const [showReferences, setShowReferences] = useState(false);
+  const [showKnowledgeGraph, setShowKnowledgeGraph] = useState(false);
+  const [activeDecisionTree, setActiveDecisionTree] = useState<DecisionTreeData | null>(null);
+
+  // Find the latest message with citations/guidelines for the reference sidebar
+  const latestRefMsg = [...messages].reverse().find(
+    (m) => m.role === "assistant" && ((m.citations && m.citations.length > 0) || (m.guidelines_used && m.guidelines_used.length > 0))
+  );
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Track the pending assistant message ID so we can update it
   const pendingMsgIdRef = useRef<string | null>(null);
 
   const scrollToBottom = useCallback(() => {
@@ -178,7 +147,6 @@ export default function Home() {
                   }));
                 }
               } else if (eventType === "fast_answer") {
-                // Show the fast answer IMMEDIATELY — before complete answer
                 const msgId = crypto.randomUUID();
                 pendingMsgIdRef.current = msgId;
                 const fastMsg: Message = {
@@ -194,7 +162,6 @@ export default function Home() {
               } else if (eventType === "result") {
                 if (!sessionId) setSessionId(data.session_id);
 
-                // Update the existing fast-answer message with full data
                 const fullMsg: Message = {
                   id: pendingMsgIdRef.current || crypto.randomUUID(),
                   role: "assistant",
@@ -202,6 +169,8 @@ export default function Home() {
                   fast_answer: data.fast_answer,
                   complete_answer: data.complete_answer,
                   trust_scores: data.trust_scores,
+                  trust_reasons: data.trust_reasons,
+                  scorer_confidence: data.scorer_confidence,
                   guidelines_used: data.guidelines_used,
                   citations: data.citations,
                   agents_used: data.agents_used,
@@ -209,12 +178,14 @@ export default function Home() {
                   total_time_ms: data.total_time_ms,
                   total_input_tokens: data.total_input_tokens,
                   total_output_tokens: data.total_output_tokens,
+                  decision_tree: data.decision_tree,
+                  language: data.language,
+                  priority_country: data.priority_country,
                   timestamp: Date.now(),
                 };
 
                 setMessages((prev) => {
                   if (pendingMsgIdRef.current) {
-                    // Replace the fast-answer-only message with the full result
                     return prev.map((m) =>
                       m.id === pendingMsgIdRef.current ? fullMsg : m
                     );
@@ -251,101 +222,152 @@ export default function Home() {
     }
   };
 
-  const handleClearPatient = async () => {
+  const handleNewChat = async () => {
     if (sessionId) {
       await fetch(`${API_URL}/api/patient/clear?session_id=${sessionId}`, {
         method: "POST",
       }).catch(() => {});
     }
     setPatientSummary(null);
+    setPatientData(null);
     setSessionId(null);
     setMessages([]);
+    setAgentStatuses([]);
+    setShowReferences(false);
+    setActiveDecisionTree(null);
+    setShowKnowledgeGraph(false);
   };
 
   return (
-    <div className="flex flex-col h-screen max-w-4xl mx-auto">
-      {/* Header */}
-      <header className="flex items-center justify-between px-6 py-4 border-b border-border/30">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center text-white font-bold text-sm">
-            C
+    <div className="flex h-screen">
+      {/* Main chat area */}
+      <div className={`flex flex-col flex-1 min-w-0 transition-all ${showReferences ? "mr-0" : ""}`}>
+        {/* Header */}
+        <header className="flex items-center justify-between px-6 py-4 border-b border-border/30">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center text-white font-bold text-sm">
+              C
+            </div>
+            <div>
+              <h1 className="text-lg font-semibold text-gray-100">CerebraLink</h1>
+              <p className="text-xs text-gray-500">Medical AI Assistant</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-lg font-semibold text-gray-100">CerebraLink</h1>
-            <p className="text-xs text-gray-500">Medical AI Assistant</p>
+          <div className="flex items-center gap-2">
+            {patientData && (
+              <button
+                onClick={() => setShowKnowledgeGraph(true)}
+                className="text-xs text-emerald-400/80 hover:text-emerald-400 transition-colors px-3 py-1.5 rounded-lg border border-emerald-500/30 hover:border-emerald-500/50"
+              >
+                Knowledge Graph
+              </button>
+            )}
+            <button
+              onClick={handleNewChat}
+              className="text-xs text-gray-400 hover:text-gray-200 transition-colors px-3 py-1.5 rounded-lg border border-border/50 hover:border-border bg-surface hover:bg-surface-light"
+            >
+              + New Chat
+            </button>
           </div>
+        </header>
+
+        {/* Patient Banner */}
+        {patientSummary && <PatientBanner summary={patientSummary} />}
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          {messages.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-full text-center">
+              <div className="w-16 h-16 rounded-2xl bg-accent/10 flex items-center justify-center mb-4">
+                <span className="text-3xl text-accent">C</span>
+              </div>
+              <h2 className="text-xl font-semibold text-gray-200 mb-2">
+                CerebraLink
+              </h2>
+              <p className="text-gray-500 max-w-md text-sm leading-relaxed">
+                Medical AI assistant with multi-agent council. Ask any clinical
+                question — get fast and complete answers backed by the latest
+                guidelines with LaTeX calculations.
+              </p>
+            </div>
+          )}
+
+          {messages.map((msg) => (
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              onOpenDecisionTree={(tree) => setActiveDecisionTree(tree)}
+              onOpenKnowledgeGraph={() => setShowKnowledgeGraph(true)}
+              onOpenReferences={() => setShowReferences(true)}
+              hasPatientData={!!patientData}
+            />
+          ))}
+
+          {/* Status bar */}
+          {isLoading && agentStatuses.length > 0 && (
+            <StatusBar
+              agents={agentStatuses}
+              elapsed={elapsed}
+              totalTokens={totalTokens}
+            />
+          )}
+
+          {isLoading && agentStatuses.length === 0 && (
+            <div className="flex items-center gap-2 text-gray-500 text-sm pl-2">
+              <div className="flex gap-1">
+                <span
+                  className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce"
+                  style={{ animationDelay: "0ms" }}
+                />
+                <span
+                  className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce"
+                  style={{ animationDelay: "150ms" }}
+                />
+                <span
+                  className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce"
+                  style={{ animationDelay: "300ms" }}
+                />
+              </div>
+              <span>Connecting...</span>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
         </div>
-        {patientSummary && (
-          <button
-            onClick={handleClearPatient}
-            className="text-xs text-gray-500 hover:text-gray-300 transition-colors px-3 py-1.5 rounded-lg border border-border/50 hover:border-border"
-          >
-            New Patient
-          </button>
-        )}
-      </header>
 
-      {/* Patient Banner */}
-      {patientSummary && <PatientBanner summary={patientSummary} />}
+        {/* Chat Input */}
+        <div className="px-6 pb-6 pt-2">
+          <ChatInput onSend={handleSend} isLoading={isLoading} />
+        </div>
+      </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-16 h-16 rounded-2xl bg-accent/10 flex items-center justify-center mb-4">
-              <span className="text-3xl text-accent">C</span>
-            </div>
-            <h2 className="text-xl font-semibold text-gray-200 mb-2">
-              CerebraLink
-            </h2>
-            <p className="text-gray-500 max-w-md text-sm leading-relaxed">
-              Medical AI assistant with multi-agent council. Ask any clinical
-              question — get fast and complete answers backed by the latest
-              guidelines with LaTeX calculations.
-            </p>
-          </div>
-        )}
-
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
-        ))}
-
-        {/* Status bar — shown during loading */}
-        {isLoading && agentStatuses.length > 0 && (
-          <StatusBar
-            agents={agentStatuses}
-            elapsed={elapsed}
-            totalTokens={totalTokens}
+      {/* Reference Sidebar (right) */}
+      {showReferences && latestRefMsg && (
+        <div className="w-[420px] shrink-0 border-l border-border/30">
+          <ReferenceSidebar
+            citations={latestRefMsg.citations || []}
+            guidelines={latestRefMsg.guidelines_used || []}
+            onClose={() => setShowReferences(false)}
           />
-        )}
+        </div>
+      )}
 
-        {/* Simple loading before first status */}
-        {isLoading && agentStatuses.length === 0 && (
-          <div className="flex items-center gap-2 text-gray-500 text-sm pl-2">
-            <div className="flex gap-1">
-              <span
-                className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce"
-                style={{ animationDelay: "0ms" }}
-              />
-              <span
-                className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce"
-                style={{ animationDelay: "150ms" }}
-              />
-              <span
-                className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce"
-                style={{ animationDelay: "300ms" }}
-              />
-            </div>
-            <span>Connecting...</span>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
+      {/* Knowledge Graph Modal */}
+      {showKnowledgeGraph && patientData && (
+        <KnowledgeGraph
+          patientData={patientData}
+          onClose={() => setShowKnowledgeGraph(false)}
+        />
+      )}
 
-      {/* Chat Input */}
-      <div className="px-6 pb-6 pt-2">
-        <ChatInput onSend={handleSend} isLoading={isLoading} />
-      </div>
+      {/* Decision Tree Modal */}
+      {activeDecisionTree && (
+        <DecisionTreeViewer
+          title={activeDecisionTree.title}
+          nodes={activeDecisionTree.nodes}
+          edges={activeDecisionTree.edges}
+          onClose={() => setActiveDecisionTree(null)}
+        />
+      )}
     </div>
   );
 }

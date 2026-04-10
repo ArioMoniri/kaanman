@@ -3,17 +3,20 @@
 @tailwind utilities;
 
 @import "katex/dist/katex.min.css";
+@import "@xyflow/react/dist/style.css";
 
 :root {
   --surface: #1F2023;
   --surface-light: #2A2A2E;
   --border-color: #444444;
+  --font-manrope: 'Manrope', sans-serif;
 }
 
 html, body {
   background-color: #131316;
   color: #E5E7EB;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-manrope), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 15px;
 }
 
 *:focus-visible {
@@ -50,4 +53,13 @@ textarea {
 }
 .katex .mfrac .frac-line {
   border-color: #8B5CF6 !important;
+}
+
+/* React Flow dark theme */
+.react-flow__node {
+  font-family: var(--font-manrope), sans-serif;
+  font-size: 12px;
+}
+.react-flow__attribution {
+  display: none !important;
 }

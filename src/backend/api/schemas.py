@@ -45,11 +45,42 @@ class TrustScores(BaseModel):
     source_recency: int = Field(ge=0, le=100)
 
 
+class TrustReasons(BaseModel):
+    evidence_quality: str = ""
+    guideline_alignment: str = ""
+    clinical_relevance: str = ""
+    safety_check: str = ""
+    completeness: str = ""
+    source_recency: str = ""
+
+
+class DecisionTreeNode(BaseModel):
+    id: str
+    type: str = "default"
+    data: dict = {}
+    position: dict = {}
+
+
+class DecisionTreeEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+    label: str = ""
+
+
+class DecisionTree(BaseModel):
+    title: str = ""
+    nodes: list[DecisionTreeNode] = []
+    edges: list[DecisionTreeEdge] = []
+
+
 class ChatResponse(BaseModel):
     session_id: str
     fast_answer: str
     complete_answer: str
     trust_scores: TrustScores
+    trust_reasons: TrustReasons = TrustReasons()
+    scorer_confidence: int = 70
     guidelines_used: list[GuidelineRef] = []
     citations: list[Citation] = []
     agents_used: list[str] = []
@@ -57,6 +88,9 @@ class ChatResponse(BaseModel):
     total_time_ms: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    decision_tree: DecisionTree | None = None
+    language: str = "en"
+    priority_country: str = ""
 
 
 class PatientIngestRequest(BaseModel):

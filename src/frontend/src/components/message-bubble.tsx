@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { RadarChart } from "./radar-chart";
+import { TrustGauges } from "./trust-gauges";
 import { LatexRenderer } from "./latex-renderer";
 
 interface TrustScores {
@@ -11,6 +11,15 @@ interface TrustScores {
   safety_check: number;
   completeness: number;
   source_recency: number;
+}
+
+interface TrustReasons {
+  evidence_quality: string;
+  guideline_alignment: string;
+  clinical_relevance: string;
+  safety_check: string;
+  completeness: string;
+  source_recency: string;
 }
 
 interface Guideline {
@@ -38,13 +47,21 @@ interface AgentTiming {
   output_tokens: number;
 }
 
-interface Message {
+interface DecisionTreeData {
+  title: string;
+  nodes: { id: string; type?: string; data: Record<string, unknown>; position: Record<string, unknown> }[];
+  edges: { id: string; source: string; target: string; label?: string }[];
+}
+
+export interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
   fast_answer?: string;
   complete_answer?: string;
   trust_scores?: TrustScores;
+  trust_reasons?: TrustReasons;
+  scorer_confidence?: number;
   guidelines_used?: Guideline[];
   citations?: Citation[];
   agents_used?: string[];
@@ -52,6 +69,9 @@ interface Message {
   total_time_ms?: number;
   total_input_tokens?: number;
   total_output_tokens?: number;
+  decision_tree?: DecisionTreeData;
+  language?: string;
+  priority_country?: string;
   timestamp: number;
 }
 
@@ -63,13 +83,20 @@ const COUNTRY_LABELS: Record<string, string> = {
   WHO: "WHO",
 };
 
+const COUNTRY_FLAGS: Record<string, string> = {
+  USA: "\u{1F1FA}\u{1F1F8}",
+  UK: "\u{1F1EC}\u{1F1E7}",
+  Europe: "\u{1F1EA}\u{1F1FA}",
+  Turkey: "\u{1F1F9}\u{1F1F7}",
+  WHO: "\u{1F3E5}",
+};
+
 /** Render markdown-like bold (**text**) and bullet points */
 function renderMarkdown(text: string): React.ReactNode[] {
   const lines = text.split("\n");
   const elements: React.ReactNode[] = [];
 
   lines.forEach((line, lineIdx) => {
-    // Process bold markers within text
     const parts = line.split(/(\*\*[^*]+\*\*)/g);
     const rendered = parts.map((part, i) => {
       if (part.startsWith("**") && part.endsWith("**")) {
@@ -93,7 +120,21 @@ function renderMarkdown(text: string): React.ReactNode[] {
   return elements;
 }
 
-export function MessageBubble({ message }: { message: Message }) {
+interface MessageBubbleProps {
+  message: Message;
+  onOpenDecisionTree?: (tree: DecisionTreeData) => void;
+  onOpenKnowledgeGraph?: () => void;
+  onOpenReferences?: () => void;
+  hasPatientData?: boolean;
+}
+
+export function MessageBubble({
+  message,
+  onOpenDecisionTree,
+  onOpenKnowledgeGraph,
+  onOpenReferences,
+  hasPatientData,
+}: MessageBubbleProps) {
   const [mode, setMode] = useState<"fast" | "complete">("fast");
   const [showCitations, setShowCitations] = useState(false);
 
@@ -118,35 +159,84 @@ export function MessageBubble({ message }: { message: Message }) {
   const hasCitations = message.citations && message.citations.length > 0;
   const hasGuidelines =
     message.guidelines_used && message.guidelines_used.length > 0;
+  const hasDecisionTree =
+    message.decision_tree &&
+    message.decision_tree.nodes &&
+    message.decision_tree.nodes.length > 0;
+
+  // Language / country header
+  const priorityCountry = message.priority_country;
+  const countryFlag = priorityCountry ? COUNTRY_FLAGS[priorityCountry] : null;
 
   return (
     <div className="flex flex-col gap-3 max-w-full">
       <div className="rounded-2xl rounded-bl-md bg-surface-light border border-border/30 px-4 py-3">
-        {/* Mode tabs */}
-        {hasDualMode && (
-          <div className="flex gap-1 mb-3 p-0.5 bg-surface rounded-lg w-fit">
-            <button
-              onClick={() => setMode("fast")}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                mode === "fast"
-                  ? "bg-accent text-white"
-                  : "text-gray-400 hover:text-gray-200"
-              }`}
-            >
-              Fast
-            </button>
-            <button
-              onClick={() => setMode("complete")}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                mode === "complete"
-                  ? "bg-accent text-white"
-                  : "text-gray-400 hover:text-gray-200"
-              }`}
-            >
-              Complete
-            </button>
+        {/* Country / Language header */}
+        {countryFlag && priorityCountry && (
+          <div className="flex items-center gap-1.5 mb-2 text-[11px] text-gray-400">
+            <span className="text-base">{countryFlag}</span>
+            <span>Priority: {COUNTRY_LABELS[priorityCountry] || priorityCountry} guidelines</span>
           </div>
         )}
+
+        {/* Mode tabs + action buttons row */}
+        <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+          {/* Left: mode tabs */}
+          {hasDualMode ? (
+            <div className="flex gap-1 p-0.5 bg-surface rounded-lg w-fit">
+              <button
+                onClick={() => setMode("fast")}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                  mode === "fast"
+                    ? "bg-accent text-white"
+                    : "text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                Fast
+              </button>
+              <button
+                onClick={() => setMode("complete")}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                  mode === "complete"
+                    ? "bg-accent text-white"
+                    : "text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                Complete
+              </button>
+            </div>
+          ) : (
+            <div />
+          )}
+
+          {/* Right: action buttons */}
+          <div className="flex items-center gap-1.5">
+            {hasDecisionTree && onOpenDecisionTree && (
+              <button
+                onClick={() => onOpenDecisionTree(message.decision_tree!)}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-accent/10 text-accent/80 hover:bg-accent/20 hover:text-accent border border-accent/20 transition-all"
+              >
+                <span>&#9670;</span> Decision Tree
+              </button>
+            )}
+            {hasPatientData && onOpenKnowledgeGraph && (
+              <button
+                onClick={onOpenKnowledgeGraph}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-emerald-500/10 text-emerald-400/80 hover:bg-emerald-500/20 hover:text-emerald-400 border border-emerald-500/20 transition-all"
+              >
+                <span>&#9675;</span> Knowledge Graph
+              </button>
+            )}
+            {hasCitations && onOpenReferences && (
+              <button
+                onClick={onOpenReferences}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-blue-500/10 text-blue-400/80 hover:bg-blue-500/20 hover:text-blue-400 border border-blue-500/20 transition-all"
+              >
+                <span>&#9741;</span> References
+              </button>
+            )}
+          </div>
+        </div>
 
         {/* Answer content */}
         <div className="text-sm text-gray-200 leading-relaxed whitespace-pre-wrap">
@@ -297,10 +387,21 @@ export function MessageBubble({ message }: { message: Message }) {
         )}
       </div>
 
-      {/* Radar chart */}
+      {/* Trust Gauges (replaces RadarChart) */}
       {message.trust_scores && (
         <div className="ml-2">
-          <RadarChart scores={message.trust_scores} />
+          <TrustGauges
+            scores={message.trust_scores}
+            reasons={message.trust_reasons || {
+              evidence_quality: "",
+              guideline_alignment: "",
+              clinical_relevance: "",
+              safety_check: "",
+              completeness: "",
+              source_recency: "",
+            }}
+            scorerConfidence={message.scorer_confidence ?? 70}
+          />
         </div>
       )}
     </div>
