@@ -2,6 +2,8 @@
 
 import React, { useState } from "react";
 import { TrustGauges } from "./trust-gauges";
+import { RadarChart } from "./radar-chart";
+import { Badge, type BadgeVariant } from "./ui/badge";
 import { LatexRenderer } from "./latex-renderer";
 
 interface TrustScores {
@@ -91,6 +93,26 @@ const COUNTRY_FLAGS: Record<string, string> = {
   WHO: "\u{1F3E5}",
 };
 
+/** Determine badge variant based on effect size heuristic */
+function getEffectBadgeVariant(
+  citation: Citation,
+  index: number,
+  total: number,
+  priorityCountry?: string
+): BadgeVariant {
+  // WHO always gets teal
+  if (citation.country === "WHO") return "teal-subtle";
+  // Priority country gets amber
+  if (priorityCountry && citation.country === priorityCountry) return "amber";
+  // Effect size: top third = high, middle = moderate, bottom = low
+  const position = index / Math.max(total, 1);
+  const hasQuote = citation.quote && citation.quote.length > 20;
+  if (position < 0.33 || (position < 0.5 && hasQuote)) return "green";
+  if (position < 0.66) return "blue";
+  if (hasQuote) return "purple-subtle";
+  return "gray-subtle";
+}
+
 /** Render markdown-like bold (**text**) and bullet points */
 function renderMarkdown(text: string): React.ReactNode[] {
   const lines = text.split("\n");
@@ -164,7 +186,6 @@ export function MessageBubble({
     message.decision_tree.nodes &&
     message.decision_tree.nodes.length > 0;
 
-  // Language / country header
   const priorityCountry = message.priority_country;
   const countryFlag = priorityCountry ? COUNTRY_FLAGS[priorityCountry] : null;
 
@@ -181,7 +202,6 @@ export function MessageBubble({
 
         {/* Mode tabs + action buttons row */}
         <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-          {/* Left: mode tabs */}
           {hasDualMode ? (
             <div className="flex gap-1 p-0.5 bg-surface rounded-lg w-fit">
               <button
@@ -209,7 +229,6 @@ export function MessageBubble({
             <div />
           )}
 
-          {/* Right: action buttons */}
           <div className="flex items-center gap-1.5">
             {hasDecisionTree && onOpenDecisionTree && (
               <button
@@ -247,7 +266,7 @@ export function MessageBubble({
           )}
         </div>
 
-        {/* Guidelines used */}
+        {/* Guidelines as effect-size badges */}
         {hasGuidelines && (
           <div className="mt-3 pt-3 border-t border-border/30">
             <p className="text-xs text-gray-500 mb-1.5">
@@ -255,40 +274,37 @@ export function MessageBubble({
             </p>
             <div className="flex flex-wrap gap-1.5">
               {message.guidelines_used!.map((g, i) => {
-                const badge = (
-                  <span
+                let variant: BadgeVariant = "blue-subtle";
+                if (g.country === "WHO") variant = "teal-subtle";
+                else if (priorityCountry && g.country === priorityCountry)
+                  variant = "amber";
+                else if (i === 0) variant = "green";
+                else if (i < 3) variant = "blue";
+                else variant = "purple-subtle";
+
+                return (
+                  <Badge
                     key={i}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface text-xs text-gray-400 border border-border/30 hover:border-accent/40 transition-colors"
+                    variant={variant}
+                    size="sm"
+                    href={g.url}
+                    title={g.title}
+                    icon={
+                      <span className="text-[9px] font-bold opacity-70">
+                        {COUNTRY_LABELS[g.country] || g.country}
+                      </span>
+                    }
                   >
-                    <span className="font-semibold text-accent/70">
-                      {COUNTRY_LABELS[g.country] || g.country}
-                    </span>
-                    <span className="truncate max-w-[200px]">{g.source}</span>
-                    {g.year && (
-                      <span className="text-gray-500">({g.year})</span>
-                    )}
-                  </span>
+                    {g.source}
+                    {g.year ? ` (${g.year})` : ""}
+                  </Badge>
                 );
-                if (g.url) {
-                  return (
-                    <a
-                      key={i}
-                      href={g.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="no-underline"
-                    >
-                      {badge}
-                    </a>
-                  );
-                }
-                return badge;
               })}
             </div>
           </div>
         )}
 
-        {/* Citations / References */}
+        {/* Citations as effect-size badges */}
         {hasCitations && (
           <div className="mt-2 pt-2 border-t border-border/20">
             <button
@@ -304,49 +320,64 @@ export function MessageBubble({
               </span>
             </button>
             {showCitations && (
-              <div className="mt-2 space-y-1.5">
-                {message.citations!.map((c) => (
-                  <div
-                    key={c.index}
-                    className="flex gap-2 text-[11px] text-gray-400 px-2 py-1.5 rounded-lg bg-surface/50"
-                  >
-                    <span className="text-accent/60 font-bold shrink-0">
-                      [{c.index}]
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {c.url ? (
-                          <a
-                            href={c.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="font-medium text-accent/80 hover:text-accent underline underline-offset-2"
-                          >
-                            {c.source}
-                          </a>
-                        ) : (
-                          <span className="font-medium text-gray-300">
-                            {c.source}
-                          </span>
-                        )}
-                        <span className="px-1 py-0 rounded bg-accent/10 text-accent/70 text-[9px] font-semibold">
-                          {COUNTRY_LABELS[c.country] || c.country}
-                        </span>
-                        {c.year && (
-                          <span className="text-gray-500">{c.year}</span>
-                        )}
-                      </div>
-                      <div className="text-gray-500 mt-0.5 truncate">
-                        {c.title}
-                      </div>
-                      {c.quote && (
-                        <div className="text-gray-500 mt-0.5 italic text-[10px] line-clamp-2">
-                          &quot;{c.quote}&quot;
+              <div className="mt-2 space-y-2">
+                {message.citations!.map((c, idx) => {
+                  const variant = getEffectBadgeVariant(
+                    c,
+                    idx,
+                    message.citations!.length,
+                    priorityCountry
+                  );
+
+                  return (
+                    <div
+                      key={c.index}
+                      className="flex items-start gap-2 px-2 py-1.5 rounded-lg bg-surface/50"
+                    >
+                      <Badge
+                        variant={variant}
+                        size="sm"
+                        className="mt-0.5 shrink-0"
+                      >
+                        [{c.index}]
+                      </Badge>
+                      <div className="min-w-0 flex-1 text-[11px]">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {c.url ? (
+                            <a
+                              href={c.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-medium text-accent/80 hover:text-accent underline underline-offset-2"
+                            >
+                              {c.source}
+                            </a>
+                          ) : (
+                            <span className="font-medium text-gray-300">
+                              {c.source}
+                            </span>
+                          )}
+                          <Badge variant="pill" size="sm">
+                            {COUNTRY_LABELS[c.country] || c.country}
+                          </Badge>
+                          {c.year && (
+                            <span className="text-gray-500 text-[10px]">
+                              {c.year}
+                            </span>
+                          )}
                         </div>
-                      )}
+                        <div className="text-gray-500 mt-0.5 truncate">
+                          {c.title}
+                        </div>
+                        {c.quote && (
+                          <div className="text-gray-500 mt-0.5 italic text-[10px] line-clamp-2">
+                            &quot;{c.quote}&quot;
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -356,12 +387,9 @@ export function MessageBubble({
         {message.agents_used && message.agents_used.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1">
             {message.agents_used.map((a, i) => (
-              <span
-                key={i}
-                className="px-1.5 py-0.5 rounded text-[10px] text-gray-500 bg-surface border border-border/20"
-              >
+              <Badge key={i} variant="gray-subtle" size="sm">
                 {a}
-              </span>
+              </Badge>
             ))}
           </div>
         )}
@@ -387,9 +415,10 @@ export function MessageBubble({
         )}
       </div>
 
-      {/* Trust Gauges (replaces RadarChart) */}
+      {/* Trust visualization: Radar + Gauges side by side */}
       {message.trust_scores && (
-        <div className="ml-2">
+        <div className="ml-2 flex flex-wrap gap-3 items-start">
+          <RadarChart scores={message.trust_scores} />
           <TrustGauges
             scores={message.trust_scores}
             reasons={message.trust_reasons || {

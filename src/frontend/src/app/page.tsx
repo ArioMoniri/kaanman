@@ -8,6 +8,7 @@ import { StatusBar } from "@/components/status-bar";
 import { ReferenceSidebar } from "@/components/reference-sidebar";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
 import { DecisionTreeViewer } from "@/components/decision-tree-viewer";
+import { ReferenceLegend } from "@/components/reference-legend";
 import { ShimmerText } from "@/components/ui/shimmer-text";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100";
@@ -255,6 +256,7 @@ export default function Home() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <ReferenceLegend />
             {patientData && (
               <button
                 onClick={() => setShowKnowledgeGraph(true)}
