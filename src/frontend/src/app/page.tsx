@@ -8,6 +8,7 @@ import { StatusBar } from "@/components/status-bar";
 import { ReferenceSidebar } from "@/components/reference-sidebar";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
 import { DecisionTreeViewer } from "@/components/decision-tree-viewer";
+import { ShimmerText } from "@/components/ui/shimmer-text";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100";
 
@@ -313,22 +314,8 @@ export default function Home() {
           )}
 
           {isLoading && agentStatuses.length === 0 && (
-            <div className="flex items-center gap-2 text-gray-500 text-sm pl-2">
-              <div className="flex gap-1">
-                <span
-                  className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce"
-                  style={{ animationDelay: "0ms" }}
-                />
-                <span
-                  className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce"
-                  style={{ animationDelay: "150ms" }}
-                />
-                <span
-                  className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce"
-                  style={{ animationDelay: "300ms" }}
-                />
-              </div>
-              <span>Connecting...</span>
+            <div className="pl-2">
+              <ShimmerText text="Connecting to agent council..." showChevron={false} />
             </div>
           )}
           <div ref={messagesEndRef} />
