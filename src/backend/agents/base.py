@@ -26,6 +26,9 @@ class BaseAgent:
     system_prompt: str = "You are a helpful assistant."
     max_tokens: int = 4096
 
+    def __init__(self):
+        self.last_usage = {"input_tokens": 0, "output_tokens": 0}
+
     async def call(
         self,
         user_message: str,
@@ -40,6 +43,10 @@ class BaseAgent:
             system=self.system_prompt,
             messages=[{"role": "user", "content": user_message}],
         )
+        self.last_usage = {
+            "input_tokens": msg.usage.input_tokens,
+            "output_tokens": msg.usage.output_tokens,
+        }
         return msg.content[0].text
 
     async def call_json(self, user_message: str, temperature: float = 0.1) -> dict[str, Any]:

@@ -18,6 +18,24 @@ class GuidelineRef(BaseModel):
     url: str | None = None
 
 
+class Citation(BaseModel):
+    index: int
+    title: str
+    source: str
+    country: str
+    year: int | None = None
+    url: str | None = None
+    quote: str = ""
+
+
+class AgentTiming(BaseModel):
+    agent: str
+    time_ms: int
+    input_tokens: int = 0
+    output_tokens: int = 0
+    status: str = "done"
+
+
 class TrustScores(BaseModel):
     evidence_quality: int = Field(ge=0, le=100)
     guideline_alignment: int = Field(ge=0, le=100)
@@ -33,7 +51,12 @@ class ChatResponse(BaseModel):
     complete_answer: str
     trust_scores: TrustScores
     guidelines_used: list[GuidelineRef] = []
+    citations: list[Citation] = []
     agents_used: list[str] = []
+    agent_timings: list[AgentTiming] = []
+    total_time_ms: int = 0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
 
 
 class PatientIngestRequest(BaseModel):

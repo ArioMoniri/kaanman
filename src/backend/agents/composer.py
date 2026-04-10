@@ -10,6 +10,7 @@ from typing import Any
 
 from src.backend.agents.base import BaseAgent
 from src.backend.agents.router import RouteDecision
+from src.backend.api.schemas import Citation
 from src.backend.core.config import settings
 
 
@@ -36,12 +37,12 @@ Structure:
 ## COMPLETE MODE (target: 400-800 words) — FULL ANALYSIS
 Structure:
 1. **Assessment**: Clinical interpretation of the question + patient context
-2. **Evidence & Guidelines**: Cite guidelines with country attribution (NICE/UK, AHA/USA, ESC/Europe, WHO)
+2. **Evidence & Guidelines**: Cite guidelines with country attribution using numbered references like [1], [2]. Use the CITATION LIST provided below to match references. Example: "According to the NICE 2024 guideline [1], first-line therapy is..."
 3. **Calculations**: If the drug agent performed calculations, include the FULL LaTeX formulas and worked examples. Preserve all $$ LaTeX blocks $$ exactly as provided by the drug agent.
 4. **Recommendations**: Specific, actionable next steps
 5. **Consultation Advisory**: See below
 6. **Monitoring**: What to track and when
-7. **References**: Guideline sources with year and country
+7. **References**: List each citation as "[N] Source — Title (Year, Country)"
 
 ## CONSULTATION ADVISORY (include in BOTH modes when applicable)
 
@@ -79,11 +80,23 @@ Respond with JSON:
         agent_outputs: dict[str, Any],
         patient_context: dict[str, Any] | None,
         route: RouteDecision,
+        citations: list[Citation] | None = None,
     ) -> dict[str, str]:
         parts = [
             f"ORIGINAL QUESTION: {query}",
             f"CATEGORY: {route.category} | URGENCY: {route.urgency}/5",
         ]
+
+        if citations:
+            cite_lines = []
+            for c in citations:
+                line = f"[{c.index}] {c.source} — {c.title}"
+                if c.year:
+                    line += f" ({c.year}, {c.country})"
+                if c.quote:
+                    line += f" | Key: {c.quote}"
+                cite_lines.append(line)
+            parts.append(f"\nCITATION LIST (use [N] references in your answer):\n" + "\n".join(cite_lines))
 
         if patient_context:
             # Summarize patient context for consultation checking

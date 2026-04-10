@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
-import traceback
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from src.backend.api.schemas import (
     ChatRequest,
@@ -26,11 +27,10 @@ _orchestrator = Orchestrator()
 @router.post("/api/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     mem = SessionMemory(req.session_id)
-    info = await mem.session_info()
+    await mem.session_info()
     session_id = mem.session_id
 
     await mem.append_message("user", req.message)
-
     patient_ctx = await mem.get_patient_context()
     history = await mem.get_history(last_n=10)
 
@@ -47,6 +47,71 @@ async def chat(req: ChatRequest):
     })
 
     return ChatResponse(session_id=session_id, **result.model_dump())
+
+
+@router.post("/api/chat/stream")
+async def chat_stream(req: ChatRequest):
+    """SSE streaming endpoint — sends agent status events then the final result."""
+    mem = SessionMemory(req.session_id)
+    await mem.session_info()
+    session_id = mem.session_id
+
+    await mem.append_message("user", req.message)
+    patient_ctx = await mem.get_patient_context()
+    history = await mem.get_history(last_n=10)
+
+    status_queue: asyncio.Queue[dict | None] = asyncio.Queue()
+
+    async def on_status(event: dict):
+        await status_queue.put(event)
+
+    async def run_orchestrator():
+        try:
+            result = await _orchestrator.run(
+                message=req.message,
+                patient_context=patient_ctx,
+                history=history,
+                session_id=session_id,
+                on_status=on_status,
+            )
+            await mem.append_message("assistant", result.fast_answer, {
+                "complete_answer": result.complete_answer,
+                "trust_scores": result.trust_scores.model_dump(),
+            })
+            resp = ChatResponse(session_id=session_id, **result.model_dump())
+            await status_queue.put({"_type": "result", "data": resp.model_dump()})
+        except Exception as e:
+            await status_queue.put({"_type": "error", "message": str(e)})
+        finally:
+            await status_queue.put(None)  # sentinel
+
+    async def event_generator():
+        task = asyncio.create_task(run_orchestrator())
+        try:
+            while True:
+                event = await status_queue.get()
+                if event is None:
+                    break
+                if event.get("_type") == "result":
+                    yield f"event: result\ndata: {json.dumps(event['data'])}\n\n"
+                elif event.get("_type") == "error":
+                    yield f"event: error\ndata: {json.dumps({'message': event['message']})}\n\n"
+                else:
+                    yield f"event: status\ndata: {json.dumps(event)}\n\n"
+            yield f"event: done\ndata: {{}}\n\n"
+        finally:
+            if not task.done():
+                task.cancel()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/api/patient/ingest", response_model=PatientIngestResponse)
