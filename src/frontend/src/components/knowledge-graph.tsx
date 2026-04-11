@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useRef } from "react";
 import {
   ReactFlow,
   Background,
@@ -9,6 +9,8 @@ import {
   type Node,
   type Edge,
   type NodeTypes,
+  type OnNodesChange,
+  applyNodeChanges,
   Handle,
   Position,
 } from "@xyflow/react";
@@ -38,6 +40,8 @@ interface GraphNodeData {
   category: NodeCategory;
   meta?: Record<string, string>;
   episodeCount?: number;
+  /** Full list of items for hover tooltip (e.g. all episodes in a department) */
+  detailList?: string[];
   [key: string]: unknown;
 }
 
@@ -57,25 +61,30 @@ const COLORS: Record<NodeCategory, { bg: string; border: string; text: string; g
 };
 
 const CATEGORY_ICONS: Record<NodeCategory, string> = {
-  patient: "\u2764",      // heart
-  department: "\u2316",   // position indicator
-  episode: "\u25CB",      // circle
-  diagnosis: "\u26A0",    // warning
-  medication: "\u2695",   // caduceus
-  allergy: "\u2622",      // biohazard
-  doctor: "\u2640",       // person
-  facility: "\u2302",     // house
+  patient: "\u2764",
+  department: "\u2316",
+  episode: "\u25CB",
+  diagnosis: "\u26A0",
+  medication: "\u2695",
+  allergy: "\u2622",
+  doctor: "\u2640",
+  facility: "\u2302",
 };
 
 /* ------------------------------------------------------------------ */
-/*  Custom node component                                              */
+/*  Custom node component with hover tooltip                           */
 /* ------------------------------------------------------------------ */
 
 function GraphNode({ data }: { data: GraphNodeData }) {
+  const [hovered, setHovered] = useState(false);
   const cat = data.category;
   const palette = COLORS[cat];
   const isCenter = cat === "patient";
   const size = isCenter ? 120 : cat === "department" ? 56 : 44;
+
+  const hasDetails = data.detailList && data.detailList.length > 0;
+  const hasMeta = data.meta && Object.keys(data.meta).length > 0;
+  const showTooltip = hovered && (hasDetails || hasMeta || data.subtitle);
 
   return (
     <div
@@ -86,6 +95,8 @@ function GraphNode({ data }: { data: GraphNodeData }) {
         textAlign: "center",
         position: "relative",
       }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
       <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
       <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
@@ -101,14 +112,18 @@ function GraphNode({ data }: { data: GraphNodeData }) {
           borderRadius: "50%",
           background: palette.bg,
           border: `2px solid ${palette.border}`,
-          boxShadow: `0 0 ${isCenter ? 24 : 12}px ${palette.glow}`,
+          boxShadow: hovered
+            ? `0 0 ${isCenter ? 36 : 20}px ${palette.glow}, 0 0 ${isCenter ? 48 : 28}px ${palette.glow}`
+            : `0 0 ${isCenter ? 24 : 12}px ${palette.glow}`,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           fontSize: isCenter ? 28 : cat === "department" ? 18 : 14,
           color: palette.text,
           fontWeight: 700,
-          transition: "box-shadow 0.2s",
+          transition: "box-shadow 0.2s, transform 0.2s",
+          transform: hovered ? "scale(1.08)" : "scale(1)",
+          cursor: "grab",
         }}
       >
         {isCenter
@@ -153,7 +168,7 @@ function GraphNode({ data }: { data: GraphNodeData }) {
         </div>
       )}
 
-      {/* Episode count badge for departments */}
+      {/* Episode count badge */}
       {data.episodeCount && data.episodeCount > 0 && (
         <div
           style={{
@@ -171,6 +186,61 @@ function GraphNode({ data }: { data: GraphNodeData }) {
           }}
         >
           {data.episodeCount}
+        </div>
+      )}
+
+      {/* Hover tooltip */}
+      {showTooltip && (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: "50%",
+            transform: "translateX(-50%)",
+            marginTop: 8,
+            background: "rgba(17,17,20,0.95)",
+            backdropFilter: "blur(12px)",
+            border: `1px solid ${palette.border}40`,
+            borderRadius: 10,
+            padding: "10px 14px",
+            minWidth: 180,
+            maxWidth: 320,
+            maxHeight: 260,
+            overflowY: "auto",
+            zIndex: 100,
+            textAlign: "left",
+            boxShadow: `0 8px 32px rgba(0,0,0,0.6), 0 0 12px ${palette.glow}`,
+          }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 700, color: palette.text, marginBottom: 4 }}>
+            {data.label}
+          </div>
+          {data.subtitle && (
+            <div style={{ fontSize: 10, color: palette.border, marginBottom: 6 }}>
+              {data.subtitle}
+            </div>
+          )}
+          {hasMeta && (
+            <div style={{ marginBottom: 6 }}>
+              {Object.entries(data.meta!).map(([k, v]) => (
+                <div key={k} style={{ fontSize: 9, color: "#9ca3af", lineHeight: 1.5 }}>
+                  <span style={{ color: "#d1d5db", fontWeight: 600 }}>{k}:</span> {v}
+                </div>
+              ))}
+            </div>
+          )}
+          {hasDetails && (
+            <div>
+              <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>
+                Details ({data.detailList!.length})
+              </div>
+              {data.detailList!.map((item, i) => (
+                <div key={i} style={{ fontSize: 9, color: "#d1d5db", lineHeight: 1.6, borderBottom: "1px solid rgba(255,255,255,0.05)", paddingBottom: 2, marginBottom: 2 }}>
+                  {item}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -196,6 +266,44 @@ function polarToCartesian(
 }
 
 /* ------------------------------------------------------------------ */
+/*  ICD code descriptions (common codes)                               */
+/* ------------------------------------------------------------------ */
+
+const ICD_DESCRIPTIONS: Record<string, string> = {
+  "J45": "Asthma",
+  "J45.0": "Predominantly allergic asthma",
+  "J45.1": "Nonallergic asthma",
+  "J45.9": "Asthma, unspecified",
+  "H40": "Glaucoma",
+  "H40.1": "Primary open-angle glaucoma",
+  "H40.9": "Glaucoma, unspecified",
+  "M45": "Ankylosing spondylitis",
+  "M46": "Other inflammatory spondylopathies",
+  "M54": "Dorsalgia",
+  "M54.5": "Low back pain",
+  "B18": "Chronic viral hepatitis",
+  "B18.1": "Chronic viral hepatitis B",
+  "K21": "Gastro-esophageal reflux disease",
+  "K21.0": "GERD with esophagitis",
+  "E11": "Type 2 diabetes mellitus",
+  "I10": "Essential hypertension",
+  "I25": "Chronic ischemic heart disease",
+  "J44": "COPD",
+  "N18": "Chronic kidney disease",
+  "Z96": "Presence of functional implants",
+};
+
+function getIcdDescription(icd: string): string {
+  if (!icd) return "";
+  // Exact match
+  if (ICD_DESCRIPTIONS[icd]) return ICD_DESCRIPTIONS[icd];
+  // Try parent code (e.g., J45.9 -> J45)
+  const parent = icd.split(".")[0];
+  if (ICD_DESCRIPTIONS[parent]) return ICD_DESCRIPTIONS[parent];
+  return "";
+}
+
+/* ------------------------------------------------------------------ */
 /*  Graph builder                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -207,9 +315,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
 
   const patientInfo = (data.patient as Record<string, unknown>) || data;
   const episodes = (data.episodes as Record<string, unknown>[]) || [];
-  const summary = (data.summary as Record<string, unknown>) || {};
 
-  /* ---- center coords for radial layout ---- */
   const CX = 0;
   const CY = 0;
 
@@ -228,25 +334,25 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     id: patientId,
     type: "graphNode",
     position: { x: CX - 80, y: CY - 60 },
+    draggable: true,
     data: {
       label: patientName,
       subtitle: [patientPid && `ID: ${patientPid}`, patientBirth].filter(Boolean).join(" | "),
       category: "patient" as NodeCategory,
+      meta: {
+        ...(patientPid && { "Patient ID": patientPid }),
+        ...(patientBirth && { "Birth Date": patientBirth }),
+        "Total Episodes": String(episodes.length),
+      },
     } satisfies GraphNodeData,
   });
 
   /* ============ 2. Build maps for dedup ============ */
-
-  // Department -> episodes
-  const deptEpisodes = new Map<string, string[]>();
-  // Diagnosis key -> { name, icd, episodeIds }
-  const diagMap = new Map<string, { name: string; icd: string; episodeNodeIds: string[] }>();
-  // Doctor -> episodes
-  const doctorEpisodes = new Map<string, string[]>();
-  // Facility -> episodes
+  const deptEpisodes = new Map<string, { nodeIds: string[]; dates: string[] }>();
+  const diagMap = new Map<string, { name: string; icd: string; episodeNodeIds: string[]; dates: string[] }>();
+  const doctorEpisodes = new Map<string, { nodeIds: string[]; departments: string[] }>();
   const facilityEpisodes = new Map<string, string[]>();
 
-  // Episode node IDs indexed by episode index
   const episodeNodeIds: string[] = [];
 
   /* ============ 3. Create episode nodes & collect metadata ============ */
@@ -262,14 +368,18 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
 
     // Collect department
     if (service) {
-      if (!deptEpisodes.has(service)) deptEpisodes.set(service, []);
-      deptEpisodes.get(service)!.push(epNodeId);
+      if (!deptEpisodes.has(service)) deptEpisodes.set(service, { nodeIds: [], dates: [] });
+      deptEpisodes.get(service)!.nodeIds.push(epNodeId);
+      if (date) deptEpisodes.get(service)!.dates.push(date);
     }
 
     // Collect doctor
     if (doctor) {
-      if (!doctorEpisodes.has(doctor)) doctorEpisodes.set(doctor, []);
-      doctorEpisodes.get(doctor)!.push(epNodeId);
+      if (!doctorEpisodes.has(doctor)) doctorEpisodes.set(doctor, { nodeIds: [], departments: [] });
+      doctorEpisodes.get(doctor)!.nodeIds.push(epNodeId);
+      if (service && !doctorEpisodes.get(doctor)!.departments.includes(service)) {
+        doctorEpisodes.get(doctor)!.departments.push(service);
+      }
     }
 
     // Collect facility
@@ -285,23 +395,41 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
       const icd = (d.ICDCode as string) || (d.icd_code as string) || "";
       const key = icd || dxName;
       if (!key) return;
-      if (!diagMap.has(key)) diagMap.set(key, { name: dxName, icd, episodeNodeIds: [] });
+      if (!diagMap.has(key)) diagMap.set(key, { name: dxName, icd, episodeNodeIds: [], dates: [] });
       diagMap.get(key)!.episodeNodeIds.push(epNodeId);
+      if (date) diagMap.get(key)!.dates.push(date);
     });
 
-    // Episode node (positioned later)
+    // Build episode detail meta
+    const dxSummary = diagnoses.map((d) => {
+      const name = (d.DiagnosisName as string) || "";
+      const icd = (d.ICDCode as string) || "";
+      const desc = getIcdDescription(icd);
+      if (icd && desc) return `${name} (${icd} - ${desc})`;
+      if (icd) return `${name} (${icd})`;
+      return name;
+    }).filter(Boolean);
+
+    const examText = ((ep.examination_text as string) || "").slice(0, 200);
+
     nodes.push({
       id: epNodeId,
       type: "graphNode",
-      position: { x: 0, y: 0 }, // placeholder
+      position: { x: 0, y: 0 },
+      draggable: true,
       data: {
         label: `${date || "No date"}`,
         subtitle: service,
         category: "episode" as NodeCategory,
         meta: {
-          ...(episodeId && { id: episodeId }),
-          ...(doctor && { doctor }),
+          ...(episodeId && { "Episode ID": episodeId }),
+          ...(doctor && { Doctor: doctor }),
+          ...(facility && { Facility: facility }),
         },
+        detailList: [
+          ...dxSummary.map((d) => `Dx: ${d}`),
+          ...(examText ? [`Notes: ${examText}`] : []),
+        ],
       } satisfies GraphNodeData,
     });
   });
@@ -316,19 +444,21 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     deptNodeIds.set(dept, deptId);
     const angle = (360 / departments.length) * i - 90;
     const pos = polarToCartesian(CX, CY, DEPT_RADIUS, angle);
+    const info = deptEpisodes.get(dept)!;
 
     nodes.push({
       id: deptId,
       type: "graphNode",
       position: { x: pos.x - 50, y: pos.y - 28 },
+      draggable: true,
       data: {
         label: dept,
         category: "department" as NodeCategory,
-        episodeCount: deptEpisodes.get(dept)!.length,
+        episodeCount: info.nodeIds.length,
+        detailList: info.dates.map((d, idx) => `${idx + 1}. ${d}`),
       } satisfies GraphNodeData,
     });
 
-    // Edge: patient -> department
     edges.push({
       id: `e-p-dept-${deptId}`,
       source: patientId,
@@ -340,14 +470,12 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
 
   /* ============ 5. Position episode nodes around their department ============ */
   const EPISODE_RADIUS = 200;
-  // Group episodes by department for layout
   departments.forEach((dept, deptIdx) => {
-    const epIds = deptEpisodes.get(dept)!;
+    const epIds = deptEpisodes.get(dept)!.nodeIds;
     const deptAngle = (360 / departments.length) * deptIdx - 90;
     const deptPos = polarToCartesian(CX, CY, DEPT_RADIUS, deptAngle);
     const deptNodeId = deptNodeIds.get(dept)!;
 
-    // Spread episodes in a fan around the department node
     const fanSpread = Math.min(120, epIds.length * 18);
     const startAngle = deptAngle - fanSpread / 2;
 
@@ -358,13 +486,11 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
           : startAngle + (fanSpread / (epIds.length - 1)) * epIdx;
       const pos = polarToCartesian(deptPos.x, deptPos.y, EPISODE_RADIUS, angle);
 
-      // Update the position of the episode node
       const epNode = nodes.find((n) => n.id === epId);
       if (epNode) {
         epNode.position = { x: pos.x - 50, y: pos.y - 22 };
       }
 
-      // Edge: department -> episode
       edges.push({
         id: `e-dept-ep-${deptNodeId}-${epId}`,
         source: deptNodeId,
@@ -374,15 +500,13 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     });
   });
 
-  /* ============ 6. Diagnosis nodes (outer ring, deduplicated) ============ */
+  /* ============ 6. Diagnosis nodes (deduplicated, with ICD descriptions) ============ */
   const DIAG_RADIUS = 180;
   const diagEntries = Array.from(diagMap.entries());
 
-  // Place diagnoses near the centroid of their connected episodes
-  diagEntries.forEach(([key, { name, icd, episodeNodeIds: epIds }]) => {
+  diagEntries.forEach(([, { name, icd, episodeNodeIds: epIds, dates }]) => {
     const diagId = nextId();
 
-    // Compute centroid of connected episode nodes
     let avgX = 0;
     let avgY = 0;
     let count = 0;
@@ -399,29 +523,34 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
       avgY /= count;
     }
 
-    // Push outward from center
     const dx = avgX - CX;
     const dy = avgY - CY;
     const dist = Math.sqrt(dx * dx + dy * dy) || 1;
     const px = avgX + (dx / dist) * DIAG_RADIUS;
     const py = avgY + (dy / dist) * DIAG_RADIUS;
 
-    const displayName = name || key;
-    const label = icd ? `${displayName}\n(${icd})` : displayName;
+    const displayName = name || icd;
+    const icdDesc = getIcdDescription(icd);
+    // Always show ICD with description in subtitle
+    const subtitleParts: string[] = [];
+    if (icd) {
+      subtitleParts.push(icdDesc ? `${icd} (${icdDesc})` : icd);
+    }
 
     nodes.push({
       id: diagId,
       type: "graphNode",
       position: { x: px - 50, y: py - 22 },
+      draggable: true,
       data: {
         label: displayName.length > 30 ? displayName.slice(0, 28) + "..." : displayName,
-        subtitle: icd || undefined,
+        subtitle: subtitleParts.join("") || undefined,
         category: "diagnosis" as NodeCategory,
         episodeCount: epIds.length > 1 ? epIds.length : undefined,
+        detailList: dates.map((d, i) => `Occurrence ${i + 1}: ${d}`),
       } satisfies GraphNodeData,
     });
 
-    // Edges: episode -> diagnosis
     epIds.forEach((eid) => {
       edges.push({
         id: `e-ep-dx-${eid}-${diagId}`,
@@ -459,10 +588,15 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
         id: medId,
         type: "graphNode",
         position: { x: pos.x - 50, y: pos.y - 22 },
+        draggable: true,
         data: {
           label: medName.length > 28 ? medName.slice(0, 26) + "..." : medName,
           subtitle: dosage || undefined,
           category: "medication" as NodeCategory,
+          meta: {
+            "Medication": medName,
+            ...(dosage && { Dosage: dosage }),
+          },
         } satisfies GraphNodeData,
       });
 
@@ -499,10 +633,12 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
       id: allergyId,
       type: "graphNode",
       position: { x: pos.x - 50, y: pos.y - 22 },
+      draggable: true,
       data: {
         label: allergyLabel,
         subtitle: allergyDetail,
         category: "allergy" as NodeCategory,
+        meta: Object.fromEntries(allergyEntries.map(([k, v]) => [k, String(v)])),
       } satisfies GraphNodeData,
     });
 
@@ -515,7 +651,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     });
   }
 
-  /* ============ 9. Doctor nodes (deduplicated) ============ */
+  /* ============ 9. Doctor nodes (deduplicated, with department lists) ============ */
   const doctors = Array.from(doctorEpisodes.keys());
   if (doctors.length > 0 && doctors.length <= 30) {
     const DOC_RADIUS = 250;
@@ -524,6 +660,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
 
     doctors.forEach((doc, i) => {
       const docId = nextId();
+      const info = doctorEpisodes.get(doc)!;
       const angle =
         doctors.length === 1
           ? DOC_START
@@ -534,10 +671,16 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
         id: docId,
         type: "graphNode",
         position: { x: pos.x - 50, y: pos.y - 22 },
+        draggable: true,
         data: {
           label: doc.length > 24 ? doc.slice(0, 22) + "..." : doc,
           category: "doctor" as NodeCategory,
-          episodeCount: doctorEpisodes.get(doc)!.length,
+          episodeCount: info.nodeIds.length,
+          meta: {
+            "Full Name": doc,
+            "Episodes": String(info.nodeIds.length),
+          },
+          detailList: info.departments.map((d) => `Dept: ${d}`),
         } satisfies GraphNodeData,
       });
 
@@ -569,6 +712,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
         id: facId,
         type: "graphNode",
         position: { x: pos.x - 50, y: pos.y - 22 },
+        draggable: true,
         data: {
           label: fac.length > 28 ? fac.slice(0, 26) + "..." : fac,
           category: "facility" as NodeCategory,
@@ -640,30 +784,47 @@ function Legend() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Stats bar                                                          */
+/*  Stats bar with hover lists                                         */
 /* ------------------------------------------------------------------ */
 
 function StatsBar({ data }: { data: Record<string, unknown> }) {
-  const episodes = (data.episodes as Record<string, unknown>[]) || [];
-  const summary = (data.summary as Record<string, unknown>) || {};
-  const departments = (summary.departments as string[]) || [];
-  const doctors = (summary.doctors as string[]) || [];
+  const [hoveredStat, setHoveredStat] = useState<string | null>(null);
 
-  // Count unique diagnoses
-  const diagSet = new Set<string>();
+  const episodes = (data.episodes as Record<string, unknown>[]) || [];
+
+  // Build lists for hover
+  const deptSet = new Map<string, number>();
+  const diagSet = new Map<string, number>();
+  const docSet = new Map<string, number>();
+
   episodes.forEach((ep) => {
+    const svc = (ep.service_name as string) || "";
+    if (svc) deptSet.set(svc, (deptSet.get(svc) || 0) + 1);
+
+    const doc = (ep.doctor_name as string) || "";
+    if (doc) docSet.set(doc, (docSet.get(doc) || 0) + 1);
+
     const dxs = (ep.diagnosis as Record<string, unknown>[]) || [];
     dxs.forEach((d) => {
-      const key = (d.ICDCode as string) || (d.DiagnosisName as string) || "";
-      if (key) diagSet.add(key);
+      const name = (d.DiagnosisName as string) || "";
+      const icd = (d.ICDCode as string) || "";
+      const desc = getIcdDescription(icd);
+      const label = icd
+        ? `${name} (${icd}${desc ? ` - ${desc}` : ""})`
+        : name;
+      if (label) diagSet.set(label, (diagSet.get(label) || 0) + 1);
     });
   });
 
-  const stats = [
-    { label: "Episodes", value: episodes.length },
-    { label: "Departments", value: departments.length || new Set(episodes.map((e) => e.service_name)).size },
-    { label: "Diagnoses", value: diagSet.size },
-    { label: "Doctors", value: doctors.length || new Set(episodes.map((e) => e.doctor_name).filter(Boolean)).size },
+  const sortedDepts = Array.from(deptSet.entries()).sort((a, b) => b[1] - a[1]);
+  const sortedDiags = Array.from(diagSet.entries()).sort((a, b) => b[1] - a[1]);
+  const sortedDocs = Array.from(docSet.entries()).sort((a, b) => b[1] - a[1]);
+
+  const stats: { label: string; value: number; list: [string, number][] }[] = [
+    { label: "Episodes", value: episodes.length, list: [] },
+    { label: "Departments", value: deptSet.size, list: sortedDepts },
+    { label: "Diagnoses", value: diagSet.size, list: sortedDiags },
+    { label: "Doctors", value: docSet.size, list: sortedDocs },
   ];
 
   return (
@@ -682,12 +843,62 @@ function StatsBar({ data }: { data: Record<string, unknown> }) {
         zIndex: 10,
       }}
     >
-      {stats.map(({ label, value }) => (
-        <div key={label} style={{ textAlign: "center" }}>
+      {stats.map(({ label, value, list }) => (
+        <div
+          key={label}
+          style={{ textAlign: "center", position: "relative", cursor: list.length > 0 ? "pointer" : "default" }}
+          onMouseEnter={() => list.length > 0 && setHoveredStat(label)}
+          onMouseLeave={() => setHoveredStat(null)}
+        >
           <div style={{ fontSize: 16, fontWeight: 700, color: "#e5e7eb" }}>{value}</div>
           <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>
             {label}
           </div>
+
+          {/* Hover dropdown list */}
+          {hoveredStat === label && list.length > 0 && (
+            <div
+              style={{
+                position: "absolute",
+                top: "100%",
+                right: 0,
+                marginTop: 6,
+                background: "rgba(17,17,20,0.95)",
+                backdropFilter: "blur(12px)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 10,
+                padding: "8px 0",
+                minWidth: 240,
+                maxWidth: 380,
+                maxHeight: 320,
+                overflowY: "auto",
+                zIndex: 100,
+                textAlign: "left",
+                boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
+              }}
+            >
+              <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, padding: "2px 12px 6px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                {label} ({list.length})
+              </div>
+              {list.map(([name, count], i) => (
+                <div
+                  key={i}
+                  style={{
+                    fontSize: 10,
+                    color: "#d1d5db",
+                    padding: "4px 12px",
+                    borderBottom: "1px solid rgba(255,255,255,0.03)",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 8,
+                  }}
+                >
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{name}</span>
+                  <span style={{ color: "#6b7280", flexShrink: 0 }}>{count}x</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       ))}
     </div>
@@ -699,15 +910,37 @@ function StatsBar({ data }: { data: Record<string, unknown> }) {
 /* ------------------------------------------------------------------ */
 
 export function KnowledgeGraph({ patientData, onClose }: KnowledgeGraphProps) {
-  const { nodes, edges } = useMemo(() => buildGraph(patientData), [patientData]);
+  const initialGraph = useMemo(() => buildGraph(patientData), [patientData]);
+  const [nodes, setNodes] = useState<Node[]>(initialGraph.nodes);
+  const edges = initialGraph.edges;
+  const backdropRef = useRef<HTMLDivElement>(null);
+
+  const onNodesChange: OnNodesChange = useCallback(
+    (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
+    [],
+  );
 
   const minimapNodeColor = useCallback((node: Node) => {
     const cat = (node.data as GraphNodeData)?.category;
     return cat ? COLORS[cat]?.border || "#6b7280" : "#6b7280";
   }, []);
 
+  // Close on backdrop click
+  const handleBackdropClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.target === backdropRef.current) {
+        onClose();
+      }
+    },
+    [onClose],
+  );
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+    <div
+      ref={backdropRef}
+      className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+      onClick={handleBackdropClick}
+    >
       <div className="w-full h-full max-w-[95vw] max-h-[92vh] bg-[#0d0d10] rounded-2xl border border-white/10 flex flex-col overflow-hidden shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 bg-[#111114]">
@@ -734,7 +967,9 @@ export function KnowledgeGraph({ patientData, onClose }: KnowledgeGraphProps) {
           <ReactFlow
             nodes={nodes}
             edges={edges}
+            onNodesChange={onNodesChange}
             nodeTypes={nodeTypes}
+            nodesDraggable
             fitView
             fitViewOptions={{ padding: 0.15 }}
             colorMode="dark"

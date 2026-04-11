@@ -44,25 +44,72 @@ async def fetch_patient(patient_id: str, cookie_string: str) -> dict[str, Any]:
 
     Timeout is 600s (10 min) because patients with many episodes (60+)
     can take several minutes to scrape all examination pages.
+
+    If the fetch times out, we retry with --max-episodes to get partial
+    data (newest episodes first) rather than returning nothing.
     """
     fetch_script = SCRIPTS_DIR / "cerebral_fetch.py"
     if not fetch_script.exists():
         raise FileNotFoundError(f"Fetch script not found: {fetch_script}")
 
-    proc = subprocess.run(
-        [sys.executable, str(fetch_script), patient_id, "--stdout", "--cookie", cookie_string],
-        capture_output=True,
-        text=True,
-        timeout=600,
-    )
-    if proc.returncode != 0:
-        stderr_lines = proc.stderr.strip().split("\n")
-        raise RuntimeError(f"Patient fetch failed: {stderr_lines[-1] if stderr_lines else 'unknown error'}")
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(fetch_script), patient_id, "--stdout", "--cookie", cookie_string],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        if proc.returncode != 0:
+            stderr_lines = proc.stderr.strip().split("\n")
+            raise RuntimeError(f"Patient fetch failed: {stderr_lines[-1] if stderr_lines else 'unknown error'}")
 
-    if not proc.stdout.strip():
-        raise RuntimeError("Patient fetch returned empty output — check stderr logs")
+        if not proc.stdout.strip():
+            raise RuntimeError("Patient fetch returned empty output — check stderr logs")
 
-    return json.loads(proc.stdout)
+        data = json.loads(proc.stdout)
+
+        # If the data is very large (>100 episodes), truncate older episodes
+        # to prevent downstream LLM timeouts. Keep newest first.
+        episodes = data.get("episodes", [])
+        if len(episodes) > 80:
+            import logging
+            logging.getLogger("cerebralink.cerebral").info(
+                "Patient %s has %d episodes — truncating to newest 80", patient_id, len(episodes)
+            )
+            data["episodes"] = episodes[:80]
+            data["_truncated"] = True
+            data["_total_episodes"] = len(episodes)
+
+        return data
+
+    except subprocess.TimeoutExpired:
+        import logging
+        log = logging.getLogger("cerebralink.cerebral")
+        log.warning(
+            "Patient fetch timed out for %s — retrying with --max-episodes 30", patient_id
+        )
+        # Retry with a smaller episode limit so we get partial data
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(fetch_script), patient_id, "--stdout", "--cookie", cookie_string,
+                 "--max-episodes", "30"],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                data = json.loads(proc.stdout)
+                data["_truncated"] = True
+                data["_truncation_reason"] = "timeout"
+                log.info("Partial fetch succeeded: %d episodes", len(data.get("episodes", [])))
+                return data
+        except (subprocess.TimeoutExpired, Exception) as retry_err:
+            log.error("Retry also failed: %s", retry_err)
+
+        raise RuntimeError(
+            f"Patient fetch timed out for {patient_id}. "
+            "The patient has too many records. Try again or contact support."
+        )
 
 
 async def auto_fetch_patient(protocol_id: str) -> dict[str, Any]:

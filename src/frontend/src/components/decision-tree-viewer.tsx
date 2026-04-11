@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useRef, useCallback } from "react";
 import {
   ReactFlow,
   Background,
@@ -76,9 +76,17 @@ function buildFlowEdges(edges: DecisionTreeEdge[]): Edge[] {
 export function DecisionTreeViewer({ title, nodes, edges, onClose }: DecisionTreeViewerProps) {
   const flowNodes = buildFlowNodes(nodes);
   const flowEdges = buildFlowEdges(edges);
+  const backdropRef = useRef<HTMLDivElement>(null);
+
+  const handleBackdropClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.target === backdropRef.current) onClose();
+    },
+    [onClose],
+  );
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-6">
+    <div ref={backdropRef} className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-6" onClick={handleBackdropClick}>
       <div className="w-full h-full max-w-6xl max-h-[85vh] bg-[#131316] rounded-2xl border border-border/30 flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/30">

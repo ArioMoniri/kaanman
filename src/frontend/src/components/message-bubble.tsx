@@ -499,18 +499,21 @@ export function MessageBubble({
                 else if (i < 3) variant = "blue";
                 else variant = "purple-subtle";
 
-                const handleClick = g.url && onOpenReferenceUrl
-                  ? (e: React.MouseEvent) => {
-                      e.preventDefault();
-                      onOpenReferenceUrl(g.url!, g.title);
-                    }
-                  : undefined;
+                const handleClick = (e: React.MouseEvent) => {
+                  e.preventDefault();
+                  if (g.url && onOpenReferenceUrl) {
+                    onOpenReferenceUrl(g.url, g.title);
+                  } else if (onOpenReferences) {
+                    onOpenReferences();
+                  }
+                };
 
                 return (
                   <div
                     key={i}
                     onClick={handleClick}
-                    className={handleClick ? "cursor-pointer" : ""}
+                    className="cursor-pointer"
+                    title={g.url ? `Open: ${g.url}` : g.title}
                   >
                     <Badge
                       variant={variant}

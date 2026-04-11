@@ -131,6 +131,11 @@ PATIENT HISTORY DATES:
 - When mentioning anything from patient history (medications, procedures, diagnoses, lab results), ALWAYS include the DATE it occurred (e.g., "Hepatit B tanısı (03.07.2024)", "Kardiyoloji kontrolü (23.02.2026)")
 - Never say "previously" or "before" without a specific date
 
+ICD CODES:
+- When mentioning any ICD code, ALWAYS write the disease name in parentheses after the code
+- Example: "J45.9 (Astım)", "H40.1 (Primer Açık Açılı Glokom)", "M45 (Ankilozan Spondilit)"
+- Never write a bare ICD code without its description
+
 Return ONLY the answer text, no JSON wrapping."""
 
 
@@ -160,6 +165,11 @@ PATIENT HISTORY DATES:
 - When referencing anything from the patient's history (past diagnoses, medications taken, surgeries, lab results, visits), ALWAYS include the specific DATE (e.g., "HBV serokonversiyonu saptanmış (03.07.2024 — İç Hastalıkları)")
 - Include the department/specialty where it was found when available
 - Never say "previously diagnosed" without giving the date and context
+
+ICD CODES:
+- When mentioning any ICD code, ALWAYS write the disease/condition name in parentheses after the code
+- Example: "J45.9 (Astım)", "H40.1 (Primer Açık Açılı Glokom)", "M45 (Ankilozan Spondilit)", "B18.1 (Kronik Viral Hepatit B)"
+- Never write a bare ICD code without its description
 
 RULES:
 - NEVER include patient identifiers or real names — use [PATIENT_NAME] if needed

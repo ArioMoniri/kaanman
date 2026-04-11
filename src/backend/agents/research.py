@@ -84,6 +84,10 @@ QUERY: {query}
 SEARCH RESULTS:
 {chr(10).join(search_context)}
 
+CRITICAL: For the "url" field in each guideline, copy the EXACT full URL from the search results above.
+Do NOT shorten URLs to just the domain (e.g., do NOT write "https://ginasthma.org" if the full URL was
+"https://ginasthma.org/2024-gina-report/"). Use the complete URL exactly as provided in the search results.
+
 Synthesize the findings into structured JSON as specified."""
 
         try:
