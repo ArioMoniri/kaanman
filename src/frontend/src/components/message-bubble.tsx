@@ -79,6 +79,21 @@ export interface Message {
   timestamp: number;
 }
 
+/** Entity from patient data for deep-linking into the knowledge graph */
+export interface DeepLinkEntity {
+  text: string;        // Text to match in answers
+  category: string;    // "diagnosis" | "medication" | "department" | "doctor" | "episode"
+  label: string;       // Node label in the knowledge graph
+}
+
+const ENTITY_COLORS: Record<string, { text: string; bg: string; border: string }> = {
+  diagnosis:  { text: "#c4b5fd", bg: "rgba(139,92,246,0.10)", border: "rgba(139,92,246,0.25)" },
+  medication: { text: "#93c5fd", bg: "rgba(59,130,246,0.10)", border: "rgba(59,130,246,0.25)" },
+  department: { text: "#6ee7b7", bg: "rgba(16,185,129,0.10)", border: "rgba(16,185,129,0.25)" },
+  doctor:     { text: "#fcd34d", bg: "rgba(251,191,36,0.10)", border: "rgba(251,191,36,0.25)" },
+  episode:    { text: "#d1d5db", bg: "rgba(156,163,175,0.08)", border: "rgba(156,163,175,0.20)" },
+};
+
 const COUNTRY_LABELS: Record<string, string> = {
   USA: "USA",
   UK: "UK",
@@ -234,11 +249,47 @@ function preprocessInlineRefs(text: string): string {
   return text.replace(/\[(\d+)\]/g, "[`[$1]`](#cite-$1)");
 }
 
-/** Render a single highlight item with markdown + LaTeX support + inline refs */
-function HighlightItem({ text, onOpenReferenceUrl, citations, onOpenReferences }: { text: string; onOpenReferenceUrl?: (url: string, title: string) => void; citations?: Citation[]; onOpenReferences?: () => void }) {
-  const processed = preprocessInlineRefs(text);
+/** Pre-process text: wrap patient entity mentions with deep-link markers.
+ *  Produces Obsidian-style [[links]] as markdown links with #kg- prefix. */
+function preprocessDeepLinks(text: string, entities: DeepLinkEntity[]): string {
+  if (!entities || entities.length === 0) return text;
+
+  // 1. Protect LaTeX, code, and existing links from modification
+  const placeholders: string[] = [];
+  const protect = (m: string) => { placeholders.push(m); return `\x00PH${placeholders.length - 1}\x00`; };
+  let safe = text;
+  safe = safe.replace(/\$\$[\s\S]*?\$\$/g, protect);         // display LaTeX
+  safe = safe.replace(/\$[^$\n]+?\$/g, protect);              // inline LaTeX
+  safe = safe.replace(/`[^`]+`/g, protect);                    // inline code
+  safe = safe.replace(/\[([^\]]+)\]\([^)]+\)/g, protect);     // markdown links
+
+  // 2. Sort entities longest-first to prevent partial overlap
+  const sorted = [...entities].sort((a, b) => b.text.length - a.text.length);
+  const linked = new Set<string>();
+
+  for (const ent of sorted) {
+    if (ent.text.length < 4) continue;
+    const escaped = ent.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`\\b(${escaped})\\b`, "gi");
+    safe = safe.replace(re, (match) => {
+      const key = match.toLowerCase();
+      if (linked.has(key)) return match; // already linked first occurrence
+      linked.add(key);
+      return `[${match}](#kg-${encodeURIComponent(ent.category)}-${encodeURIComponent(ent.label)})`;
+    });
+  }
+
+  // 3. Restore placeholders
+  safe = safe.replace(/\x00PH(\d+)\x00/g, (_, idx) => placeholders[parseInt(idx)]);
+  return safe;
+}
+
+/** Render a single highlight item with markdown + LaTeX support + inline refs + deep links */
+function HighlightItem({ text, onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus, patientEntities }: { text: string; onOpenReferenceUrl?: (url: string, title: string) => void; citations?: Citation[]; onOpenReferences?: () => void; onOpenKgFocus?: (label: string) => void; patientEntities?: DeepLinkEntity[] }) {
+  let processed = preprocessInlineRefs(text);
+  processed = preprocessDeepLinks(processed, patientEntities || []);
   const hasLatex = processed.includes("$");
-  const components = markdownComponents(onOpenReferenceUrl, citations, onOpenReferences);
+  const components = markdownComponents(onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus);
 
   if (hasLatex) {
     const segments = splitLatex(processed);
@@ -267,11 +318,13 @@ function HighlightItem({ text, onOpenReferenceUrl, citations, onOpenReferences }
 }
 
 /** Highlight component — renders all highlights immediately (no stagger delay) */
-function HighlightedContent({ highlights, onOpenReferenceUrl, citations, onOpenReferences }: {
+function HighlightedContent({ highlights, onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus, patientEntities }: {
   highlights: string[];
   onOpenReferenceUrl?: (url: string, title: string) => void;
   citations?: Citation[];
   onOpenReferences?: () => void;
+  onOpenKgFocus?: (label: string) => void;
+  patientEntities?: DeepLinkEntity[];
 }) {
   if (highlights.length === 0) {
     return (
@@ -288,7 +341,7 @@ function HighlightedContent({ highlights, onOpenReferenceUrl, citations, onOpenR
             <div className={`flex gap-2.5 items-start ${isAlert ? "bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2" : ""}`}>
               <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${isAlert ? "bg-red-400" : "bg-amber-400"}`} />
               <div className="text-base text-gray-200 leading-relaxed flex-1">
-                <HighlightItem text={h} onOpenReferenceUrl={onOpenReferenceUrl} citations={citations} onOpenReferences={onOpenReferences} />
+                <HighlightItem text={h} onOpenReferenceUrl={onOpenReferenceUrl} citations={citations} onOpenReferences={onOpenReferences} onOpenKgFocus={onOpenKgFocus} patientEntities={patientEntities} />
               </div>
             </div>
           </div>
@@ -320,16 +373,19 @@ function splitLatex(text: string): { content: string; isLatex: boolean; isDispla
   return segments;
 }
 
-/** Markdown renderer with proper styling — includes inline [N] ref support */
-function MarkdownContent({ content, onOpenReferenceUrl, citations, onOpenReferences }: {
+/** Markdown renderer with proper styling — includes inline [N] ref support + deep links */
+function MarkdownContent({ content, onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus, patientEntities }: {
   content: string;
   onOpenReferenceUrl?: (url: string, title: string) => void;
   citations?: Citation[];
   onOpenReferences?: () => void;
+  onOpenKgFocus?: (label: string) => void;
+  patientEntities?: DeepLinkEntity[];
 }) {
-  const processed = preprocessInlineRefs(content);
+  let processed = preprocessInlineRefs(content);
+  processed = preprocessDeepLinks(processed, patientEntities || []);
   const hasLatex = processed.includes("$");
-  const components = markdownComponents(onOpenReferenceUrl, citations, onOpenReferences);
+  const components = markdownComponents(onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus);
 
   if (hasLatex) {
     const segments = splitLatex(processed);
@@ -358,7 +414,12 @@ function MarkdownContent({ content, onOpenReferenceUrl, citations, onOpenReferen
   );
 }
 
-function markdownComponents(onOpenReferenceUrl?: (url: string, title: string) => void, citations?: Citation[], onOpenReferences?: () => void) {
+function markdownComponents(
+  onOpenReferenceUrl?: (url: string, title: string) => void,
+  citations?: Citation[],
+  onOpenReferences?: () => void,
+  onOpenKgFocus?: (label: string) => void,
+) {
   return {
     h1: ({ children, ...props }: React.ComponentPropsWithoutRef<"h1">) => (
       <h1 className="text-xl font-bold text-gray-100 mt-4 mb-2" {...props}>{children}</h1>
@@ -410,6 +471,29 @@ function markdownComponents(onOpenReferenceUrl?: (url: string, title: string) =>
             }}
           >
             {refIndex}
+          </button>
+        );
+      }
+      // Handle knowledge-graph deep links (#kg-category-label)
+      const kgMatch = href?.match(/^#kg-([^-]+)-(.+)$/);
+      if (kgMatch && onOpenKgFocus) {
+        const category = decodeURIComponent(kgMatch[1]);
+        const label = decodeURIComponent(kgMatch[2]);
+        const colors = ENTITY_COLORS[category] || ENTITY_COLORS.episode;
+        return (
+          <button
+            className="inline-flex items-center gap-0.5 px-1 py-0 rounded text-[inherit] font-inherit transition-all cursor-pointer align-baseline leading-inherit"
+            style={{
+              color: colors.text,
+              borderBottom: `1.5px dotted ${colors.border}`,
+              background: "transparent",
+            }}
+            title={`View "${label}" in Knowledge Graph`}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = colors.bg; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+            onClick={(e) => { e.preventDefault(); onOpenKgFocus(label); }}
+          >
+            {children}
           </button>
         );
       }
@@ -467,18 +551,22 @@ interface MessageBubbleProps {
   message: Message;
   onOpenDecisionTree?: (tree: DecisionTreeData) => void;
   onOpenKnowledgeGraph?: () => void;
+  onOpenKnowledgeGraphFocus?: (label: string) => void;
   onOpenReferences?: () => void;
   onOpenReferenceUrl?: (url: string, title: string) => void;
   hasPatientData?: boolean;
+  patientEntities?: DeepLinkEntity[];
 }
 
 export function MessageBubble({
   message,
   onOpenDecisionTree,
   onOpenKnowledgeGraph,
+  onOpenKnowledgeGraphFocus,
   onOpenReferences,
   onOpenReferenceUrl,
   hasPatientData,
+  patientEntities,
 }: MessageBubbleProps) {
   const [mode, setMode] = useState<"fast" | "complete" | "highlight">("fast");
   const [showCitations, setShowCitations] = useState(false);
@@ -621,9 +709,9 @@ export function MessageBubble({
         {/* Answer content */}
         <div className="px-5 pb-4">
           {mode === "highlight" && hasDualMode ? (
-            <HighlightedContent highlights={highlights} onOpenReferenceUrl={onOpenReferenceUrl} citations={message.citations} onOpenReferences={onOpenReferences} />
+            <HighlightedContent highlights={highlights} onOpenReferenceUrl={onOpenReferenceUrl} citations={message.citations} onOpenReferences={onOpenReferences} onOpenKgFocus={onOpenKnowledgeGraphFocus} patientEntities={patientEntities} />
           ) : (
-            <MarkdownContent content={displayContent} onOpenReferenceUrl={onOpenReferenceUrl} citations={message.citations} onOpenReferences={onOpenReferences} />
+            <MarkdownContent content={displayContent} onOpenReferenceUrl={onOpenReferenceUrl} citations={message.citations} onOpenReferences={onOpenReferences} onOpenKgFocus={onOpenKnowledgeGraphFocus} patientEntities={patientEntities} />
           )}
         </div>
 

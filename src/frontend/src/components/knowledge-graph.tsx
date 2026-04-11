@@ -22,6 +22,7 @@ import {
 interface KnowledgeGraphProps {
   patientData: Record<string, unknown>;
   onClose: () => void;
+  focusLabel?: string;
 }
 
 type NodeCategory =
@@ -41,6 +42,7 @@ interface GraphNodeData {
   meta?: Record<string, string>;
   episodeCount?: number;
   detailList?: string[];
+  focused?: boolean;
   [key: string]: unknown;
 }
 
@@ -68,6 +70,7 @@ function GraphNode({ data }: { data: GraphNodeData }) {
   const cat = data.category;
   const palette = COLORS[cat];
   const isCenter = cat === "patient";
+  const isFocused = !!data.focused;
 
   const hasDetails = data.detailList && data.detailList.length > 0;
   const hasMeta = data.meta && Object.keys(data.meta).length > 0;
@@ -90,16 +93,19 @@ function GraphNode({ data }: { data: GraphNodeData }) {
           background: isCenter
             ? `linear-gradient(135deg, ${palette.bg}, ${palette.bgEnd})`
             : `linear-gradient(180deg, ${palette.bg}, ${palette.bgEnd})`,
-          border: `1.5px solid ${palette.border}${hovered ? "" : "80"}`,
+          border: `${isFocused ? "2.5px" : "1.5px"} solid ${isFocused ? palette.border : `${palette.border}${hovered ? "" : "80"}`}`,
           borderRadius: isCenter ? 20 : 14,
           padding: isCenter ? "16px 20px" : "10px 14px",
           minWidth: isCenter ? 160 : 110,
           maxWidth: isCenter ? 200 : 180,
-          boxShadow: hovered
-            ? `0 0 24px ${palette.glow}, 0 4px 20px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06)`
-            : `0 0 12px ${palette.glow}, 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)`,
+          boxShadow: isFocused
+            ? `0 0 40px ${palette.glow}, 0 0 80px ${palette.glow}, 0 4px 20px rgba(0,0,0,0.5)`
+            : hovered
+              ? `0 0 24px ${palette.glow}, 0 4px 20px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06)`
+              : `0 0 12px ${palette.glow}, 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)`,
           transition: "all 0.25s ease",
-          transform: hovered ? "scale(1.06)" : "scale(1)",
+          transform: isFocused ? "scale(1.15)" : hovered ? "scale(1.06)" : "scale(1)",
+          animation: isFocused ? "pulse-focus 1.5s ease-in-out infinite" : undefined,
           cursor: "grab",
           position: "relative",
         }}
@@ -921,9 +927,26 @@ function StatsBar({ data }: { data: Record<string, unknown> }) {
 /*  Main component                                                     */
 /* ------------------------------------------------------------------ */
 
-export function KnowledgeGraph({ patientData, onClose }: KnowledgeGraphProps) {
+export function KnowledgeGraph({ patientData, onClose, focusLabel }: KnowledgeGraphProps) {
   const initialGraph = useMemo(() => buildGraph(patientData), [patientData]);
-  const [nodes, setNodes] = useState<Node[]>(initialGraph.nodes);
+
+  // If focusLabel is provided, mark the matching node(s) as focused
+  const nodesWithFocus = useMemo(() => {
+    if (!focusLabel) return initialGraph.nodes;
+    const target = focusLabel.toLowerCase();
+    return initialGraph.nodes.map((n) => {
+      const d = n.data as GraphNodeData;
+      const match = d.label.toLowerCase().includes(target) ||
+        (d.subtitle && d.subtitle.toLowerCase().includes(target)) ||
+        (d.meta && Object.values(d.meta).some((v) => v.toLowerCase().includes(target)));
+      if (match) {
+        return { ...n, data: { ...d, focused: true } };
+      }
+      return n;
+    });
+  }, [initialGraph.nodes, focusLabel]);
+
+  const [nodes, setNodes] = useState<Node[]>(nodesWithFocus);
   const edges = initialGraph.edges;
   const backdropRef = useRef<HTMLDivElement>(null);
 
@@ -947,6 +970,14 @@ export function KnowledgeGraph({ patientData, onClose }: KnowledgeGraphProps) {
   );
 
   return (
+    <>
+    {/* Focus pulse animation */}
+    <style>{`
+      @keyframes pulse-focus {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.75; }
+      }
+    `}</style>
     <div
       ref={backdropRef}
       className="fixed inset-0 z-50 flex items-center justify-center p-3"
@@ -1035,6 +1066,26 @@ export function KnowledgeGraph({ patientData, onClose }: KnowledgeGraphProps) {
               type: "default",
               style: { strokeWidth: 1 },
             }}
+            onInit={(instance) => {
+              // Auto-zoom to focused node after initial layout
+              if (focusLabel) {
+                const target = focusLabel.toLowerCase();
+                const focusedNode = nodes.find((n) => {
+                  const d = n.data as GraphNodeData;
+                  return d.label.toLowerCase().includes(target) ||
+                    (d.subtitle && d.subtitle.toLowerCase().includes(target));
+                });
+                if (focusedNode) {
+                  setTimeout(() => {
+                    instance.fitView({
+                      nodes: [{ id: focusedNode.id }],
+                      duration: 800,
+                      padding: 3,
+                    });
+                  }, 300);
+                }
+              }
+            }}
           >
             <Background color="#1a1a2e" gap={40} size={1} />
             <Controls
@@ -1061,5 +1112,6 @@ export function KnowledgeGraph({ patientData, onClose }: KnowledgeGraphProps) {
         </div>
       </div>
     </div>
+    </>
   );
 }

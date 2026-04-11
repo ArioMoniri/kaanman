@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { ChatInput } from "@/components/chat-input";
-import { MessageBubble, type Message } from "@/components/message-bubble";
+import { MessageBubble, type Message, type DeepLinkEntity } from "@/components/message-bubble";
 import { PatientBanner } from "@/components/patient-banner";
 import { StatusBar } from "@/components/status-bar";
 import { ReferenceSidebar } from "@/components/reference-sidebar";
@@ -97,6 +97,57 @@ interface HistoryEntry {
   timestamp: number;
   messageCount: number;
   firstQuery: string;
+}
+
+/** Extract entity names from patient data for Obsidian-style deep links */
+function extractPatientEntities(data: Record<string, unknown> | null): DeepLinkEntity[] {
+  if (!data) return [];
+  const entities: DeepLinkEntity[] = [];
+  const seen = new Set<string>();
+
+  const patient = (data.patient as Record<string, unknown>) || data;
+  const episodes = (data.episodes as Record<string, unknown>[]) || [];
+
+  // Departments
+  for (const ep of episodes) {
+    const svc = (ep.service_name as string) || "";
+    if (svc && svc.length > 2 && !seen.has(svc.toLowerCase())) {
+      seen.add(svc.toLowerCase());
+      entities.push({ text: svc, category: "department", label: svc });
+    }
+  }
+
+  // Diagnoses
+  for (const ep of episodes) {
+    for (const d of ((ep.diagnosis as Record<string, unknown>[]) || [])) {
+      const name = (d.DiagnosisName as string) || (d.diagnosis_name as string) || "";
+      if (name && name.length > 3 && !seen.has(name.toLowerCase())) {
+        seen.add(name.toLowerCase());
+        entities.push({ text: name, category: "diagnosis", label: name });
+      }
+    }
+  }
+
+  // Medications
+  const recipes = ((patient.previous_recipes as Record<string, unknown>[]) || []);
+  for (const med of recipes) {
+    const name = (med.MedicineName as string) || (med.medicine_name as string) || (med.name as string) || "";
+    if (name && name.length > 3 && !seen.has(name.toLowerCase())) {
+      seen.add(name.toLowerCase());
+      entities.push({ text: name, category: "medication", label: name });
+    }
+  }
+
+  // Doctors
+  for (const ep of episodes) {
+    const doc = (ep.doctor_name as string) || "";
+    if (doc && doc.length > 3 && !seen.has(doc.toLowerCase())) {
+      seen.add(doc.toLowerCase());
+      entities.push({ text: doc, category: "doctor", label: doc });
+    }
+  }
+
+  return entities;
 }
 
 const HISTORY_KEY = "cerebralink_history";
@@ -215,6 +266,10 @@ export default function Home() {
   const [refUrl, setRefUrl] = useState<string | undefined>(undefined);
   const [refTitle, setRefTitle] = useState<string | undefined>(undefined);
   const [showHistory, setShowHistory] = useState(false);
+  const [kgFocusLabel, setKgFocusLabel] = useState<string | undefined>(undefined);
+
+  // Patient entities for Obsidian-style deep links
+  const patientEntities = useMemo(() => extractPatientEntities(patientData), [patientData]);
 
   // Abort controller for cancelling requests
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -223,6 +278,11 @@ export default function Home() {
     setRefUrl(url);
     setRefTitle(title);
     setShowReferences(true);
+  }, []);
+
+  const handleOpenKgWithFocus = useCallback((label?: string) => {
+    setKgFocusLabel(label);
+    setShowKnowledgeGraph(true);
   }, []);
 
   // Find the latest message with citations/guidelines for the reference sidebar
@@ -602,9 +662,11 @@ export default function Home() {
               message={msg}
               onOpenDecisionTree={(tree) => setActiveDecisionTree(tree)}
               onOpenKnowledgeGraph={() => setShowKnowledgeGraph(true)}
+              onOpenKnowledgeGraphFocus={handleOpenKgWithFocus}
               onOpenReferences={() => setShowReferences(true)}
               onOpenReferenceUrl={handleOpenReferenceUrl}
               hasPatientData={!!patientData}
+              patientEntities={patientEntities}
             />
           ))}
 
@@ -650,7 +712,8 @@ export default function Home() {
       {showKnowledgeGraph && patientData && (
         <KnowledgeGraph
           patientData={patientData}
-          onClose={() => setShowKnowledgeGraph(false)}
+          onClose={() => { setShowKnowledgeGraph(false); setKgFocusLabel(undefined); }}
+          focusLabel={kgFocusLabel}
         />
       )}
 

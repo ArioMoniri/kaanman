@@ -101,7 +101,70 @@ Synthesize the findings into structured JSON as specified."""
 
         try:
             result = await self.call_json(prompt)
+            # Validate URLs — LLMs often shorten to base domains, replace with real search result URLs
+            if isinstance(result, dict) and exa_results:
+                result["guidelines"] = self._validate_urls(
+                    result.get("guidelines", []), exa_results,
+                )
             return result
         except Exception:
             raw = await self.call(prompt)
             return {"guidelines": [], "synthesis": raw, "disagreements": "N/A"}
+
+    @staticmethod
+    def _validate_urls(
+        guidelines: list[dict], exa_results: list[dict[str, Any]],
+    ) -> list[dict]:
+        """Replace missing / base-domain URLs with verified search-result URLs."""
+        from urllib.parse import urlparse
+
+        clean_exa = [r for r in exa_results if r.get("url") and not r.get("error")]
+        if not clean_exa:
+            return guidelines
+
+        exa_url_set = {r["url"] for r in clean_exa}
+
+        for g in guidelines:
+            url = g.get("url") or ""
+            # Detect base-domain-only URLs (no real path)
+            is_base = False
+            if url:
+                parsed = urlparse(url)
+                is_base = parsed.path in ("", "/") or (len(parsed.path) < 5 and "." not in parsed.path)
+
+            if not url or is_base or url not in exa_url_set:
+                best = ResearchAgent._best_exa_match(g, clean_exa)
+                if best and best.get("url"):
+                    g["url"] = best["url"]
+                    # Also sync year from published_date if missing
+                    if not g.get("year") and best.get("published_date"):
+                        try:
+                            g["year"] = int(best["published_date"][:4])
+                        except (ValueError, TypeError):
+                            pass
+
+        return guidelines
+
+    @staticmethod
+    def _best_exa_match(
+        guideline: dict, exa_results: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        """Find the Exa result whose title best matches the guideline."""
+        g_title = (guideline.get("title", "") + " " + guideline.get("source", "")).lower()
+        g_words = set(w for w in g_title.split() if len(w) > 2)
+        if not g_words:
+            return None
+
+        best, best_score = None, 0.0
+        for r in exa_results:
+            r_title = (r.get("title", "")).lower()
+            r_words = set(w for w in r_title.split() if len(w) > 2)
+            if not r_words:
+                continue
+            overlap = len(g_words & r_words)
+            score = overlap / max(len(g_words), 1)
+            if score > best_score and score > 0.25:
+                best_score = score
+                best = r
+
+        return best
