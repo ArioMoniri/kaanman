@@ -943,7 +943,8 @@ export function MessageBubble({
                     priorityCountry
                   );
 
-                  const handleCitationClick = () => {
+                  const openInBrowser = (e: React.MouseEvent) => {
+                    e.stopPropagation();
                     if (c.url && onOpenReferenceUrl) {
                       onOpenReferenceUrl(c.url, c.title);
                     } else if (onOpenReferences) {
@@ -954,21 +955,26 @@ export function MessageBubble({
                   return (
                     <div
                       key={c.index}
-                      onClick={handleCitationClick}
-                      className="flex items-start gap-2 px-2.5 py-2 rounded-lg bg-surface/50 hover:bg-surface-light cursor-pointer transition-colors group"
+                      className="flex items-start gap-2 px-2.5 py-2 rounded-lg bg-surface/50 hover:bg-surface-light transition-colors group"
                     >
-                      <Badge
-                        variant={variant}
-                        size="sm"
-                        className="mt-0.5 shrink-0"
+                      <button
+                        onClick={openInBrowser}
+                        className="mt-0.5 shrink-0 cursor-pointer hover:scale-110 hover:brightness-125 transition-all"
+                        title={c.url ? `Open ${c.source} in browser` : c.title}
                       >
-                        [{c.index}]
-                      </Badge>
+                        <Badge variant={variant} size="sm">
+                          [{c.index}]
+                        </Badge>
+                      </button>
                       <div className="min-w-0 flex-1 text-xs">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className={`font-semibold text-left ${c.url ? "text-accent/80 group-hover:text-accent underline underline-offset-2" : "text-gray-300"}`}>
+                          <button
+                            onClick={openInBrowser}
+                            className={`font-semibold text-left cursor-pointer transition-colors ${c.url ? "text-accent/80 hover:text-accent underline underline-offset-2 decoration-accent/40 hover:decoration-accent/80" : "text-gray-300 hover:text-gray-200"}`}
+                            title={c.url ? `Open: ${c.url}` : c.title}
+                          >
                             {c.source}
-                          </span>
+                          </button>
                           <Badge variant="pill" size="sm">
                             {COUNTRY_LABELS[c.country] || c.country}
                           </Badge>
@@ -978,29 +984,52 @@ export function MessageBubble({
                             </span>
                           )}
                           {c.importance && (
-                            <Badge variant={c.importance === "high" ? "green" : c.importance === "medium" ? "blue" : "gray-subtle"} size="sm">
-                              {c.importance}
-                            </Badge>
+                            <button
+                              onClick={openInBrowser}
+                              className="cursor-pointer hover:scale-110 hover:brightness-125 transition-all hover:ring-1 hover:ring-accent/30 rounded-full"
+                              title={c.url ? `${c.importance} importance — click to open article` : `${c.importance} importance`}
+                            >
+                              <Badge variant={c.importance === "high" ? "green" : c.importance === "medium" ? "blue" : "gray-subtle"} size="sm">
+                                {c.importance}
+                              </Badge>
+                            </button>
                           )}
                           {c.effect_size && c.effect_size !== "none" && (
-                            <Badge variant={c.effect_size === "large" ? "green" : c.effect_size === "moderate" ? "blue" : "purple-subtle"} size="sm">
-                              {c.effect_size} effect
-                            </Badge>
+                            <button
+                              onClick={openInBrowser}
+                              className="cursor-pointer hover:scale-110 hover:brightness-125 transition-all hover:ring-1 hover:ring-accent/30 rounded-full"
+                              title={c.url ? `${c.effect_size} effect size — click to open article` : `${c.effect_size} effect size`}
+                            >
+                              <Badge variant={c.effect_size === "large" ? "green" : c.effect_size === "moderate" ? "blue" : "purple-subtle"} size="sm">
+                                {c.effect_size} effect
+                              </Badge>
+                            </button>
                           )}
                           {c.evidence_level && (
-                            <span className="text-[9px] text-gray-500 font-medium bg-surface/80 px-1.5 py-0.5 rounded">
+                            <button
+                              onClick={openInBrowser}
+                              className="text-[9px] text-gray-500 font-medium bg-surface/80 px-1.5 py-0.5 rounded cursor-pointer hover:text-accent/80 hover:bg-surface transition-colors"
+                              title={c.url ? `${c.evidence_level} — click to open article` : c.evidence_level}
+                            >
                               {c.evidence_level}
-                            </span>
+                            </button>
                           )}
                           {c.url && (
-                            <span className="text-[10px] text-accent/50 group-hover:text-accent/80 ml-auto">
+                            <button
+                              onClick={openInBrowser}
+                              className="text-[10px] text-accent/50 hover:text-accent/80 ml-auto cursor-pointer transition-colors"
+                            >
                               Open &nearr;
-                            </span>
+                            </button>
                           )}
                         </div>
-                        <div className="text-gray-400 mt-0.5 truncate">
+                        <button
+                          onClick={openInBrowser}
+                          className="text-gray-400 mt-0.5 truncate block text-left w-full cursor-pointer hover:text-accent/70 transition-colors"
+                          title={c.url ? `Open: ${c.title}` : c.title}
+                        >
                           {c.title}
-                        </div>
+                        </button>
                         {c.quote && (
                           <div className="text-gray-500 mt-0.5 italic text-[11px] line-clamp-2">
                             &quot;{c.quote}&quot;
