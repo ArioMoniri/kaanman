@@ -610,14 +610,65 @@ export default function Home() {
     setActiveDecisionTree(null);
     setShowKnowledgeGraph(false);
 
-    // Re-fetch session info from backend to get patient context
+    // Fetch full session data: messages + patient context
     try {
-      const resp = await fetch(`${API_URL}/api/session/${entry.sessionId}`);
+      const resp = await fetch(`${API_URL}/api/session/${entry.sessionId}/messages`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
-      if (data.patient_summary) {
-        setPatientSummary(data.patient_summary);
+
+      // Restore patient context
+      if (data.patient_context) {
+        setPatientData(data.patient_context);
+        const pt = data.patient_context.patient || data.patient_context;
+        setPatientSummary(
+          pt.full_name ||
+          pt.page_title ||
+          data.patient_context.full_name ||
+          data.patient_context.page_title ||
+          entry.patientName ||
+          "Patient data loaded"
+        );
       }
-    } catch { /* session may have expired */ }
+
+      // Convert Redis message history → frontend Message objects
+      if (data.messages && data.messages.length > 0) {
+        const restored: Message[] = data.messages.map(
+          (m: Record<string, unknown>, idx: number) => {
+            const msg: Message = {
+              id: `restored-${entry.sessionId}-${idx}`,
+              role: m.role as "user" | "assistant",
+              content: (m.content as string) || "",
+              timestamp: ((m.ts as number) || 0) * 1000, // Redis ts is in seconds
+            };
+            // Restore assistant metadata if available
+            if (m.role === "assistant") {
+              msg.fast_answer = (m.content as string) || "";
+              if (m.complete_answer) msg.complete_answer = m.complete_answer as string;
+              if (m.trust_scores) msg.trust_scores = m.trust_scores as Message["trust_scores"];
+              if (m.trust_reasons) msg.trust_reasons = m.trust_reasons as Message["trust_reasons"];
+              if (m.scorer_confidence) msg.scorer_confidence = m.scorer_confidence as number;
+              if (m.citations) msg.citations = m.citations as Message["citations"];
+              if (m.guidelines_used) msg.guidelines_used = m.guidelines_used as Message["guidelines_used"];
+              if (m.agents_used) msg.agents_used = m.agents_used as string[];
+              if (m.total_time_ms) msg.total_time_ms = m.total_time_ms as number;
+              if (m.language) msg.language = m.language as string;
+            }
+            return msg;
+          }
+        );
+        setMessages(restored);
+      }
+    } catch {
+      // Session may have expired in Redis — show empty chat
+      // Fall back to session info for at least the patient summary
+      try {
+        const infoResp = await fetch(`${API_URL}/api/session/${entry.sessionId}`);
+        const info = await infoResp.json();
+        if (info.patient_summary) {
+          setPatientSummary(info.patient_summary);
+        }
+      } catch { /* fully expired */ }
+    }
   }, []);
 
   return (

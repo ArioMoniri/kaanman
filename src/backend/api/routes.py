@@ -45,6 +45,13 @@ async def chat(req: ChatRequest):
     await mem.append_message("assistant", result.fast_answer, {
         "complete_answer": result.complete_answer,
         "trust_scores": result.trust_scores.model_dump(),
+        "trust_reasons": result.trust_reasons.model_dump() if hasattr(result.trust_reasons, "model_dump") else {},
+        "scorer_confidence": result.scorer_confidence,
+        "citations": [c.model_dump() for c in result.citations],
+        "guidelines_used": [g.model_dump() for g in result.guidelines_used],
+        "agents_used": result.agents_used,
+        "total_time_ms": result.total_time_ms,
+        "language": result.language,
     })
 
     return ChatResponse(session_id=session_id, **result.model_dump())
@@ -78,6 +85,13 @@ async def chat_stream(req: ChatRequest):
             await mem.append_message("assistant", result.fast_answer, {
                 "complete_answer": result.complete_answer,
                 "trust_scores": result.trust_scores.model_dump(),
+                "trust_reasons": result.trust_reasons.model_dump() if hasattr(result.trust_reasons, "model_dump") else {},
+                "scorer_confidence": result.scorer_confidence,
+                "citations": [c.model_dump() for c in result.citations],
+                "guidelines_used": [g.model_dump() for g in result.guidelines_used],
+                "agents_used": result.agents_used,
+                "total_time_ms": result.total_time_ms,
+                "language": result.language,
             })
             resp = ChatResponse(session_id=session_id, **result.model_dump())
             await status_queue.put({"_type": "result", "data": resp.model_dump()})
@@ -158,6 +172,23 @@ async def session_info(session_id: str):
     if patient_ctx:
         summary = patient_ctx.get("summary", "Patient data loaded.")
     return SessionInfoResponse(**info, patient_summary=summary)
+
+
+@router.get("/api/session/{session_id}/messages")
+async def session_messages(session_id: str):
+    """Return full conversation history for a session.
+
+    Messages include role, content, and metadata (citations, trust scores, etc.)
+    so the frontend can fully restore a previous conversation.
+    """
+    mem = SessionMemory(session_id)
+    history = await mem.get_history(last_n=100)
+    patient_ctx = await mem.get_patient_context()
+    return {
+        "session_id": session_id,
+        "messages": history,
+        "patient_context": patient_ctx,
+    }
 
 
 # ── Speech-to-text transcription ──
