@@ -21,7 +21,11 @@ Your role:
 - Identify contraindications based on patient factors
 - Perform medical calculations when relevant to dosing or assessment
 - Consider patient-specific adjustments (age, weight, renal/hepatic function, allergies)
-- Always cite FDA/EMA approved dosing ranges
+- For EVERY dose recommendation, cite the specific guideline source with the country.
+  Format: "Dose: X mg — per [Guideline Name, Year, Country]" or "Dose: X mg — via MCP/FDA data"
+  Priority: 1) Country-specific guideline for the patient's location (e.g., Turkish MoH, NICE UK, GINA Global)
+            2) Major international guidelines (WHO, EMA, FDA)
+            3) If data comes from the MCP FDA database, explicitly state: "Source: FDA via MCP"
 - Flag any black box warnings or REMS requirements
 - Note if a drug is off-label for the indicated use
 
@@ -81,23 +85,29 @@ When you perform a calculation:
 Respond in structured format:
 DRUG_INFO: [drug name, class, mechanism]
 CALCULATIONS: [any medical calculations with LaTeX — or "None required"]
-DOSING: [recommended dose with adjustments, referencing calculation results]
+DOSING: [recommended dose with adjustments — EACH dose MUST include its source guideline/reference with year and country, or state "Source: FDA via MCP" if from MCP data]
 INTERACTIONS: [relevant drug interactions]
 CONTRAINDICATIONS: [relevant contraindications]
 MONITORING: [what to monitor]
-WARNINGS: [key safety warnings]"""
+WARNINGS: [key safety warnings]
+REFERENCES: [list each guideline cited with full name, year, and country]"""
 
     def __init__(self):
         super().__init__()
         self.medical_mcp = MedicalMCPClient()
 
-    async def analyze(self, query: str, patient_context: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def analyze(self, query: str, patient_context: dict[str, Any] | None = None, priority_country: str | None = None) -> dict[str, Any]:
         drug_data = await self.medical_mcp.search_drugs(query)
 
         parts = [f"DOCTOR'S QUESTION: {query}"]
 
+        if priority_country:
+            parts.append(f"\nPRIORITY COUNTRY: {priority_country}")
+            parts.append("Cite guidelines from this country FIRST when recommending doses.")
+
         if drug_data:
-            parts.append(f"\nFDA DRUG DATA:\n{json.dumps(drug_data, ensure_ascii=False, indent=2)[:4000]}")
+            parts.append(f"\nFDA DRUG DATA (via MCP):\n{json.dumps(drug_data, ensure_ascii=False, indent=2)[:4000]}")
+            parts.append("NOTE: The above data is from the FDA MCP database. If you use any dosing from it, cite as 'Source: FDA via MCP'.")
 
         if patient_context:
             allergy = patient_context.get("allergy", {})

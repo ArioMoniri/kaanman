@@ -51,12 +51,19 @@ function ResizableSidebar({ children, onClose }: { children: React.ReactNode; on
       className="fixed top-0 right-0 h-screen z-40 bg-[#131316] flex"
       style={{ width }}
     >
-      {/* Drag handle */}
+      {/* Drag handle — wide hit area with visible grip dots */}
       <div
         onMouseDown={handleMouseDown}
-        className="w-1.5 h-full cursor-col-resize hover:bg-accent/30 active:bg-accent/50 transition-colors border-l border-border/30 shrink-0 flex items-center justify-center group"
+        className="w-3 h-full cursor-col-resize hover:bg-accent/20 active:bg-accent/40 transition-colors border-l border-border/40 shrink-0 flex items-center justify-center group"
+        style={{ touchAction: "none" }}
       >
-        <div className="w-0.5 h-8 rounded-full bg-gray-600 group-hover:bg-accent/70 transition-colors" />
+        <div className="flex flex-col items-center gap-1.5 opacity-60 group-hover:opacity-100 transition-opacity">
+          <div className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-accent" />
+          <div className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-accent" />
+          <div className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-accent" />
+          <div className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-accent" />
+          <div className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-accent" />
+        </div>
       </div>
       {/* Sidebar content */}
       <div className="flex-1 min-w-0 h-full">
@@ -80,6 +87,115 @@ interface DecisionTreeData {
   edges: { id: string; source: string; target: string; label?: string }[];
 }
 
+/* History session entry persisted to localStorage */
+interface HistoryEntry {
+  sessionId: string;
+  patientName: string | null;
+  protocolNumber: string | null;
+  timestamp: number;
+  messageCount: number;
+  firstQuery: string;
+}
+
+const HISTORY_KEY = "cerebralink_history";
+
+function loadHistory(): HistoryEntry[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveHistory(entries: HistoryEntry[]) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(entries.slice(0, 50)));
+  } catch { /* quota exceeded — ignore */ }
+}
+
+function upsertHistory(entry: HistoryEntry) {
+  const existing = loadHistory();
+  const idx = existing.findIndex((e) => e.sessionId === entry.sessionId);
+  if (idx >= 0) {
+    existing[idx] = { ...existing[idx], ...entry };
+  } else {
+    existing.unshift(entry);
+  }
+  saveHistory(existing);
+}
+
+/* History drawer component */
+function HistoryDrawer({ onClose, onRestore }: { onClose: () => void; onRestore: (entry: HistoryEntry) => void }) {
+  const [entries, setEntries] = useState<HistoryEntry[]>([]);
+
+  useEffect(() => { setEntries(loadHistory()); }, []);
+
+  const handleDelete = (sessionId: string) => {
+    const updated = entries.filter((e) => e.sessionId !== sessionId);
+    saveHistory(updated);
+    setEntries(updated);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative ml-auto w-full max-w-sm h-full bg-[#111114] border-l border-white/10 flex flex-col shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+          <div className="flex items-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+            <h2 className="text-sm font-semibold text-gray-200">Patient History</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-200 text-lg px-2 py-1 rounded hover:bg-white/5">&times;</button>
+        </div>
+
+        {/* List */}
+        <div className="flex-1 overflow-y-auto">
+          {entries.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-center p-6">
+              <div className="text-gray-600 text-sm">No previous sessions</div>
+              <div className="text-gray-700 text-xs mt-1">Past patient conversations will appear here</div>
+            </div>
+          ) : (
+            entries.map((entry) => (
+              <div
+                key={entry.sessionId}
+                className="px-5 py-3 border-b border-white/5 hover:bg-white/[0.03] transition-colors cursor-pointer group"
+                onClick={() => onRestore(entry)}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-gray-200 truncate">
+                      {entry.patientName || "Unknown Patient"}
+                    </div>
+                    {entry.protocolNumber && (
+                      <div className="text-xs text-indigo-400/80 mt-0.5">Protocol: {entry.protocolNumber}</div>
+                    )}
+                    <div className="text-xs text-gray-500 mt-1 truncate">{entry.firstQuery}</div>
+                    <div className="flex items-center gap-3 mt-1.5">
+                      <span className="text-[10px] text-gray-600">{new Date(entry.timestamp).toLocaleDateString()}</span>
+                      <span className="text-[10px] text-gray-600">{entry.messageCount} messages</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDelete(entry.sessionId); }}
+                    className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 text-xs px-1.5 py-0.5 rounded transition-all"
+                    title="Remove from history"
+                  >
+                    &times;
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -96,6 +212,7 @@ export default function Home() {
   const [activeDecisionTree, setActiveDecisionTree] = useState<DecisionTreeData | null>(null);
   const [refUrl, setRefUrl] = useState<string | undefined>(undefined);
   const [refTitle, setRefTitle] = useState<string | undefined>(undefined);
+  const [showHistory, setShowHistory] = useState(false);
 
   // Abort controller for cancelling requests
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -371,6 +488,48 @@ export default function Home() {
       .catch(() => {});
   }, [sessionId]);
 
+  // Persist session to history whenever messages or patient change
+  useEffect(() => {
+    if (!sessionId || messages.length === 0) return;
+    const firstUserMsg = messages.find((m) => m.role === "user");
+    // Try to extract protocol number from patient data
+    const protocolNumber =
+      (patientData as Record<string, unknown>)?.protocol_no as string ||
+      (patientData as Record<string, unknown>)?.patient_id as string ||
+      ((patientData as Record<string, unknown>)?.patient as Record<string, unknown>)?.patient_id as string ||
+      null;
+    upsertHistory({
+      sessionId,
+      patientName: patientSummary,
+      protocolNumber: protocolNumber || null,
+      timestamp: Date.now(),
+      messageCount: messages.length,
+      firstQuery: firstUserMsg?.content?.slice(0, 100) || "",
+    });
+  }, [sessionId, messages.length, patientSummary, patientData, messages]);
+
+  // Restore a previous session from history
+  const handleRestoreSession = useCallback(async (entry: HistoryEntry) => {
+    setShowHistory(false);
+    setSessionId(entry.sessionId);
+    setMessages([]);
+    setPatientData(null);
+    setPatientSummary(entry.patientName);
+    setAgentStatuses([]);
+    setShowReferences(false);
+    setActiveDecisionTree(null);
+    setShowKnowledgeGraph(false);
+
+    // Re-fetch session info from backend to get patient context
+    try {
+      const resp = await fetch(`${API_URL}/api/session/${entry.sessionId}`);
+      const data = await resp.json();
+      if (data.patient_summary) {
+        setPatientSummary(data.patient_summary);
+      }
+    } catch { /* session may have expired */ }
+  }, []);
+
   return (
     <div className="flex h-screen relative">
       {/* Main chat area — always centered */}
@@ -394,6 +553,17 @@ export default function Home() {
                 Knowledge Graph
               </button>
             )}
+            <button
+              onClick={() => setShowHistory(true)}
+              className="text-xs text-indigo-400/80 hover:text-indigo-400 transition-colors px-3 py-1.5 rounded-lg border border-indigo-500/30 hover:border-indigo-500/50"
+              title="Patient History"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="inline mr-1 -mt-0.5">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+              History
+            </button>
             <button
               onClick={handleNewChat}
               className="text-xs text-gray-400 hover:text-gray-200 transition-colors px-3 py-1.5 rounded-lg border border-border/50 hover:border-border bg-surface hover:bg-surface-light"
@@ -489,6 +659,14 @@ export default function Home() {
           nodes={activeDecisionTree.nodes}
           edges={activeDecisionTree.edges}
           onClose={() => setActiveDecisionTree(null)}
+        />
+      )}
+
+      {/* History Drawer */}
+      {showHistory && (
+        <HistoryDrawer
+          onClose={() => setShowHistory(false)}
+          onRestore={handleRestoreSession}
         />
       )}
     </div>

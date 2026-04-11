@@ -40,39 +40,27 @@ interface GraphNodeData {
   category: NodeCategory;
   meta?: Record<string, string>;
   episodeCount?: number;
-  /** Full list of items for hover tooltip (e.g. all episodes in a department) */
   detailList?: string[];
   [key: string]: unknown;
 }
 
 /* ------------------------------------------------------------------ */
-/*  Color palette                                                      */
+/*  Color palette — richer gradients & glows                           */
 /* ------------------------------------------------------------------ */
 
-const COLORS: Record<NodeCategory, { bg: string; border: string; text: string; glow: string }> = {
-  patient:    { bg: "#312e81", border: "#6366f1", text: "#e0e7ff", glow: "rgba(99,102,241,0.35)" },
-  department: { bg: "#064e3b", border: "#10b981", text: "#d1fae5", glow: "rgba(16,185,129,0.25)" },
-  episode:    { bg: "#1f2937", border: "#6b7280", text: "#e5e7eb", glow: "rgba(107,114,128,0.15)" },
-  diagnosis:  { bg: "#2e1065", border: "#a78bfa", text: "#ede9fe", glow: "rgba(167,139,250,0.25)" },
-  medication: { bg: "#172554", border: "#3b82f6", text: "#dbeafe", glow: "rgba(59,130,246,0.25)" },
-  allergy:    { bg: "#450a0a", border: "#ef4444", text: "#fee2e2", glow: "rgba(239,68,68,0.30)" },
-  doctor:     { bg: "#1c1917", border: "#f59e0b", text: "#fef3c7", glow: "rgba(245,158,11,0.20)" },
-  facility:   { bg: "#0c4a6e", border: "#06b6d4", text: "#cffafe", glow: "rgba(6,182,212,0.20)" },
-};
-
-const CATEGORY_ICONS: Record<NodeCategory, string> = {
-  patient: "\u2764",
-  department: "\u2316",
-  episode: "\u25CB",
-  diagnosis: "\u26A0",
-  medication: "\u2695",
-  allergy: "\u2622",
-  doctor: "\u2640",
-  facility: "\u2302",
+const COLORS: Record<NodeCategory, { bg: string; bgEnd: string; border: string; text: string; glow: string; icon: string }> = {
+  patient:    { bg: "#312e81", bgEnd: "#1e1b4b", border: "#818cf8", text: "#e0e7ff", glow: "rgba(129,140,248,0.4)", icon: "\u2764\uFE0F" },
+  department: { bg: "#064e3b", bgEnd: "#022c22", border: "#34d399", text: "#d1fae5", glow: "rgba(52,211,153,0.3)", icon: "\u{1F3E5}" },
+  episode:    { bg: "#1f2937", bgEnd: "#111827", border: "#9ca3af", text: "#e5e7eb", glow: "rgba(156,163,175,0.15)", icon: "\u{1F4CB}" },
+  diagnosis:  { bg: "#2e1065", bgEnd: "#1e0a44", border: "#c4b5fd", text: "#ede9fe", glow: "rgba(196,181,253,0.3)", icon: "\u{1F9EC}" },
+  medication: { bg: "#172554", bgEnd: "#0c1a3d", border: "#60a5fa", text: "#dbeafe", glow: "rgba(96,165,250,0.3)", icon: "\u{1F48A}" },
+  allergy:    { bg: "#450a0a", bgEnd: "#2a0505", border: "#fca5a5", text: "#fee2e2", glow: "rgba(252,165,165,0.35)", icon: "\u26A0\uFE0F" },
+  doctor:     { bg: "#422006", bgEnd: "#27150a", border: "#fbbf24", text: "#fef3c7", glow: "rgba(251,191,36,0.25)", icon: "\u{1FA7A}" },
+  facility:   { bg: "#0c4a6e", bgEnd: "#082f49", border: "#22d3ee", text: "#cffafe", glow: "rgba(34,211,238,0.25)", icon: "\u{1F3E2}" },
 };
 
 /* ------------------------------------------------------------------ */
-/*  Custom node component with hover tooltip                           */
+/*  Custom card-style node with hover tooltip                          */
 /* ------------------------------------------------------------------ */
 
 function GraphNode({ data }: { data: GraphNodeData }) {
@@ -80,7 +68,6 @@ function GraphNode({ data }: { data: GraphNodeData }) {
   const cat = data.category;
   const palette = COLORS[cat];
   const isCenter = cat === "patient";
-  const size = isCenter ? 120 : cat === "department" ? 56 : 44;
 
   const hasDetails = data.detailList && data.detailList.length > 0;
   const hasMeta = data.meta && Object.keys(data.meta).length > 0;
@@ -88,13 +75,7 @@ function GraphNode({ data }: { data: GraphNodeData }) {
 
   return (
     <div
-      style={{
-        width: isCenter ? 160 : undefined,
-        minWidth: isCenter ? undefined : 100,
-        maxWidth: isCenter ? 160 : 180,
-        textAlign: "center",
-        position: "relative",
-      }}
+      style={{ position: "relative", textAlign: "center" }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -103,91 +84,102 @@ function GraphNode({ data }: { data: GraphNodeData }) {
       <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
       <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
 
-      {/* Glow ring */}
+      {/* Card node */}
       <div
         style={{
-          width: size,
-          height: size,
-          margin: "0 auto",
-          borderRadius: "50%",
-          background: palette.bg,
-          border: `2px solid ${palette.border}`,
+          background: isCenter
+            ? `linear-gradient(135deg, ${palette.bg}, ${palette.bgEnd})`
+            : `linear-gradient(180deg, ${palette.bg}, ${palette.bgEnd})`,
+          border: `1.5px solid ${palette.border}${hovered ? "" : "80"}`,
+          borderRadius: isCenter ? 20 : 14,
+          padding: isCenter ? "16px 20px" : "10px 14px",
+          minWidth: isCenter ? 160 : 110,
+          maxWidth: isCenter ? 200 : 180,
           boxShadow: hovered
-            ? `0 0 ${isCenter ? 36 : 20}px ${palette.glow}, 0 0 ${isCenter ? 48 : 28}px ${palette.glow}`
-            : `0 0 ${isCenter ? 24 : 12}px ${palette.glow}`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: isCenter ? 28 : cat === "department" ? 18 : 14,
-          color: palette.text,
-          fontWeight: 700,
-          transition: "box-shadow 0.2s, transform 0.2s",
-          transform: hovered ? "scale(1.08)" : "scale(1)",
+            ? `0 0 24px ${palette.glow}, 0 4px 20px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06)`
+            : `0 0 12px ${palette.glow}, 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)`,
+          transition: "all 0.25s ease",
+          transform: hovered ? "scale(1.06)" : "scale(1)",
           cursor: "grab",
+          position: "relative",
         }}
       >
-        {isCenter
-          ? data.label
-              .split(" ")
-              .map((w) => w[0])
-              .join("")
-              .slice(0, 2)
-              .toUpperCase()
-          : CATEGORY_ICONS[cat]}
-      </div>
-
-      {/* Label */}
-      <div
-        style={{
-          marginTop: 6,
-          fontSize: isCenter ? 13 : 10,
-          fontWeight: isCenter ? 700 : 500,
-          color: palette.text,
-          lineHeight: 1.3,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: isCenter ? "normal" : "nowrap",
-        }}
-      >
-        {data.label}
-      </div>
-
-      {/* Subtitle */}
-      {data.subtitle && (
-        <div
-          style={{
-            fontSize: 9,
-            color: palette.border,
-            marginTop: 2,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {data.subtitle}
+        {/* Icon + Label row */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: isCenter ? "center" : "flex-start" }}>
+          <span style={{ fontSize: isCenter ? 22 : 14, lineHeight: 1 }}>
+            {palette.icon}
+          </span>
+          <div style={{ flex: 1, minWidth: 0, textAlign: isCenter ? "center" : "left" }}>
+            <div
+              style={{
+                fontSize: isCenter ? 15 : 11,
+                fontWeight: isCenter ? 800 : 600,
+                color: palette.text,
+                lineHeight: 1.3,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: isCenter ? "normal" : "nowrap",
+                letterSpacing: isCenter ? 0.3 : 0,
+              }}
+            >
+              {data.label}
+            </div>
+            {data.subtitle && (
+              <div
+                style={{
+                  fontSize: 9,
+                  color: `${palette.border}cc`,
+                  marginTop: 2,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  fontWeight: 500,
+                }}
+              >
+                {data.subtitle}
+              </div>
+            )}
+          </div>
         </div>
-      )}
 
-      {/* Episode count badge */}
-      {data.episodeCount && data.episodeCount > 0 && (
-        <div
-          style={{
-            position: "absolute",
-            top: -4,
-            right: cat === "department" ? 10 : -2,
-            background: palette.border,
-            color: "#000",
-            fontSize: 9,
-            fontWeight: 700,
-            borderRadius: 8,
-            padding: "1px 5px",
-            minWidth: 16,
-            textAlign: "center",
-          }}
-        >
-          {data.episodeCount}
-        </div>
-      )}
+        {/* Episode count badge */}
+        {data.episodeCount && data.episodeCount > 0 && (
+          <div
+            style={{
+              position: "absolute",
+              top: -8,
+              right: -6,
+              background: `linear-gradient(135deg, ${palette.border}, ${palette.bg})`,
+              color: "#fff",
+              fontSize: 9,
+              fontWeight: 700,
+              borderRadius: 10,
+              padding: "2px 7px",
+              minWidth: 18,
+              textAlign: "center",
+              boxShadow: `0 2px 8px ${palette.glow}`,
+              border: `1px solid ${palette.border}`,
+            }}
+          >
+            {data.episodeCount}
+          </div>
+        )}
+
+        {/* Bottom accent line for non-patient nodes */}
+        {!isCenter && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: 0,
+              left: 12,
+              right: 12,
+              height: 2,
+              borderRadius: 1,
+              background: `linear-gradient(90deg, transparent, ${palette.border}60, transparent)`,
+            }}
+          />
+        )}
+      </div>
 
       {/* Hover tooltip */}
       {showTooltip && (
@@ -197,45 +189,63 @@ function GraphNode({ data }: { data: GraphNodeData }) {
             top: "100%",
             left: "50%",
             transform: "translateX(-50%)",
-            marginTop: 8,
-            background: "rgba(17,17,20,0.95)",
-            backdropFilter: "blur(12px)",
+            marginTop: 10,
+            background: "linear-gradient(180deg, rgba(15,15,20,0.97), rgba(10,10,14,0.97))",
+            backdropFilter: "blur(16px)",
             border: `1px solid ${palette.border}40`,
-            borderRadius: 10,
-            padding: "10px 14px",
-            minWidth: 180,
-            maxWidth: 320,
-            maxHeight: 260,
+            borderRadius: 12,
+            padding: "12px 16px",
+            minWidth: 200,
+            maxWidth: 340,
+            maxHeight: 280,
             overflowY: "auto",
             zIndex: 100,
             textAlign: "left",
-            boxShadow: `0 8px 32px rgba(0,0,0,0.6), 0 0 12px ${palette.glow}`,
+            boxShadow: `0 12px 40px rgba(0,0,0,0.7), 0 0 20px ${palette.glow}`,
           }}
         >
-          <div style={{ fontSize: 11, fontWeight: 700, color: palette.text, marginBottom: 4 }}>
-            {data.label}
-          </div>
-          {data.subtitle && (
-            <div style={{ fontSize: 10, color: palette.border, marginBottom: 6 }}>
-              {data.subtitle}
+          {/* Header */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, paddingBottom: 6, borderBottom: `1px solid ${palette.border}20` }}>
+            <span style={{ fontSize: 14 }}>{palette.icon}</span>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: palette.text }}>{data.label}</div>
+              {data.subtitle && (
+                <div style={{ fontSize: 10, color: `${palette.border}cc`, marginTop: 1 }}>{data.subtitle}</div>
+              )}
             </div>
-          )}
+          </div>
+
+          {/* Meta info */}
           {hasMeta && (
-            <div style={{ marginBottom: 6 }}>
+            <div style={{ marginBottom: 8 }}>
               {Object.entries(data.meta!).map(([k, v]) => (
-                <div key={k} style={{ fontSize: 9, color: "#9ca3af", lineHeight: 1.5 }}>
+                <div key={k} style={{ fontSize: 10, color: "#9ca3af", lineHeight: 1.6 }}>
                   <span style={{ color: "#d1d5db", fontWeight: 600 }}>{k}:</span> {v}
                 </div>
               ))}
             </div>
           )}
+
+          {/* Detail list */}
           {hasDetails && (
             <div>
-              <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>
+              <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 4, fontWeight: 600 }}>
                 Details ({data.detailList!.length})
               </div>
               {data.detailList!.map((item, i) => (
-                <div key={i} style={{ fontSize: 9, color: "#d1d5db", lineHeight: 1.6, borderBottom: "1px solid rgba(255,255,255,0.05)", paddingBottom: 2, marginBottom: 2 }}>
+                <div
+                  key={i}
+                  style={{
+                    fontSize: 10,
+                    color: "#d1d5db",
+                    lineHeight: 1.6,
+                    borderBottom: i < data.detailList!.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none",
+                    paddingBottom: 3,
+                    marginBottom: 3,
+                    paddingLeft: 6,
+                    borderLeft: `2px solid ${palette.border}40`,
+                  }}
+                >
                   {item}
                 </div>
               ))}
@@ -295,9 +305,7 @@ const ICD_DESCRIPTIONS: Record<string, string> = {
 
 function getIcdDescription(icd: string): string {
   if (!icd) return "";
-  // Exact match
   if (ICD_DESCRIPTIONS[icd]) return ICD_DESCRIPTIONS[icd];
-  // Try parent code (e.g., J45.9 -> J45)
   const parent = icd.split(".")[0];
   if (ICD_DESCRIPTIONS[parent]) return ICD_DESCRIPTIONS[parent];
   return "";
@@ -333,7 +341,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
   nodes.push({
     id: patientId,
     type: "graphNode",
-    position: { x: CX - 80, y: CY - 60 },
+    position: { x: CX - 80, y: CY - 40 },
     draggable: true,
     data: {
       label: patientName,
@@ -366,14 +374,12 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     const facility = (ep.facility_name as string) || "";
     const episodeId = (ep.episode_id as string) || "";
 
-    // Collect department
     if (service) {
       if (!deptEpisodes.has(service)) deptEpisodes.set(service, { nodeIds: [], dates: [] });
       deptEpisodes.get(service)!.nodeIds.push(epNodeId);
       if (date) deptEpisodes.get(service)!.dates.push(date);
     }
 
-    // Collect doctor
     if (doctor) {
       if (!doctorEpisodes.has(doctor)) doctorEpisodes.set(doctor, { nodeIds: [], departments: [] });
       doctorEpisodes.get(doctor)!.nodeIds.push(epNodeId);
@@ -382,13 +388,11 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
       }
     }
 
-    // Collect facility
     if (facility) {
       if (!facilityEpisodes.has(facility)) facilityEpisodes.set(facility, []);
       facilityEpisodes.get(facility)!.push(epNodeId);
     }
 
-    // Collect diagnoses
     const diagnoses = (ep.diagnosis as Record<string, unknown>[]) || [];
     diagnoses.forEach((d) => {
       const dxName = (d.DiagnosisName as string) || (d.diagnosis_name as string) || "";
@@ -400,7 +404,6 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
       if (date) diagMap.get(key)!.dates.push(date);
     });
 
-    // Build episode detail meta
     const dxSummary = diagnoses.map((d) => {
       const name = (d.DiagnosisName as string) || "";
       const icd = (d.ICDCode as string) || "";
@@ -436,7 +439,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
 
   /* ============ 4. Department nodes (inner ring) ============ */
   const departments = Array.from(deptEpisodes.keys());
-  const DEPT_RADIUS = 320;
+  const DEPT_RADIUS = 340;
   const deptNodeIds = new Map<string, string>();
 
   departments.forEach((dept, i) => {
@@ -449,7 +452,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     nodes.push({
       id: deptId,
       type: "graphNode",
-      position: { x: pos.x - 50, y: pos.y - 28 },
+      position: { x: pos.x - 55, y: pos.y - 28 },
       draggable: true,
       data: {
         label: dept,
@@ -488,7 +491,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
 
       const epNode = nodes.find((n) => n.id === epId);
       if (epNode) {
-        epNode.position = { x: pos.x - 50, y: pos.y - 22 };
+        epNode.position = { x: pos.x - 55, y: pos.y - 22 };
       }
 
       edges.push({
@@ -500,7 +503,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     });
   });
 
-  /* ============ 6. Diagnosis nodes (deduplicated, with ICD descriptions) ============ */
+  /* ============ 6. Diagnosis nodes ============ */
   const DIAG_RADIUS = 180;
   const diagEntries = Array.from(diagMap.entries());
 
@@ -531,7 +534,6 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
 
     const displayName = name || icd;
     const icdDesc = getIcdDescription(icd);
-    // Always show ICD with description in subtitle
     const subtitleParts: string[] = [];
     if (icd) {
       subtitleParts.push(icdDesc ? `${icd} (${icdDesc})` : icd);
@@ -540,7 +542,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     nodes.push({
       id: diagId,
       type: "graphNode",
-      position: { x: px - 50, y: py - 22 },
+      position: { x: px - 55, y: py - 22 },
       draggable: true,
       data: {
         label: displayName.length > 30 ? displayName.slice(0, 28) + "..." : displayName,
@@ -565,7 +567,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
   const recipes = (patientInfo.previous_recipes as Record<string, unknown>[]) || [];
   if (recipes.length > 0) {
     const MED_ANGLE_START = 200;
-    const MED_RADIUS = 280;
+    const MED_RADIUS = 300;
     const medSpread = Math.min(100, recipes.length * 15);
 
     recipes.forEach((med, i) => {
@@ -587,7 +589,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
       nodes.push({
         id: medId,
         type: "graphNode",
-        position: { x: pos.x - 50, y: pos.y - 22 },
+        position: { x: pos.x - 55, y: pos.y - 22 },
         draggable: true,
         data: {
           label: medName.length > 28 ? medName.slice(0, 26) + "..." : medName,
@@ -627,12 +629,12 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     }
 
     const ALLERGY_ANGLE = 30;
-    const pos = polarToCartesian(CX, CY, 260, ALLERGY_ANGLE);
+    const pos = polarToCartesian(CX, CY, 280, ALLERGY_ANGLE);
 
     nodes.push({
       id: allergyId,
       type: "graphNode",
-      position: { x: pos.x - 50, y: pos.y - 22 },
+      position: { x: pos.x - 55, y: pos.y - 22 },
       draggable: true,
       data: {
         label: allergyLabel,
@@ -651,10 +653,10 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     });
   }
 
-  /* ============ 9. Doctor nodes (deduplicated, with department lists) ============ */
+  /* ============ 9. Doctor nodes ============ */
   const doctors = Array.from(doctorEpisodes.keys());
   if (doctors.length > 0 && doctors.length <= 30) {
-    const DOC_RADIUS = 250;
+    const DOC_RADIUS = 270;
     const DOC_START = 140;
     const docSpread = Math.min(160, doctors.length * 18);
 
@@ -670,7 +672,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
       nodes.push({
         id: docId,
         type: "graphNode",
-        position: { x: pos.x - 50, y: pos.y - 22 },
+        position: { x: pos.x - 55, y: pos.y - 22 },
         draggable: true,
         data: {
           label: doc.length > 24 ? doc.slice(0, 22) + "..." : doc,
@@ -693,10 +695,10 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     });
   }
 
-  /* ============ 10. Facility nodes (deduplicated) ============ */
+  /* ============ 10. Facility nodes ============ */
   const facilities = Array.from(facilityEpisodes.keys());
   if (facilities.length > 0 && facilities.length <= 15) {
-    const FAC_RADIUS = 260;
+    const FAC_RADIUS = 280;
     const FAC_START = -30;
     const facSpread = Math.min(100, facilities.length * 25);
 
@@ -711,7 +713,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
       nodes.push({
         id: facId,
         type: "graphNode",
-        position: { x: pos.x - 50, y: pos.y - 22 },
+        position: { x: pos.x - 55, y: pos.y - 22 },
         draggable: true,
         data: {
           label: fac.length > 28 ? fac.slice(0, 26) + "..." : fac,
@@ -733,7 +735,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
 }
 
 /* ------------------------------------------------------------------ */
-/*  Legend component                                                    */
+/*  Legend component — pill-style with category colors                  */
 /* ------------------------------------------------------------------ */
 
 function Legend() {
@@ -756,27 +758,19 @@ function Legend() {
         left: 12,
         display: "flex",
         flexWrap: "wrap",
-        gap: 10,
-        background: "rgba(17,17,20,0.85)",
-        backdropFilter: "blur(8px)",
-        borderRadius: 10,
-        padding: "8px 14px",
+        gap: 8,
+        background: "rgba(10,10,14,0.9)",
+        backdropFilter: "blur(12px)",
+        borderRadius: 12,
+        padding: "10px 16px",
         border: "1px solid rgba(255,255,255,0.08)",
         zIndex: 10,
       }}
     >
       {items.map(({ category, label }) => (
         <div key={category} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <div
-            style={{
-              width: 10,
-              height: 10,
-              borderRadius: "50%",
-              background: COLORS[category].border,
-              boxShadow: `0 0 6px ${COLORS[category].glow}`,
-            }}
-          />
-          <span style={{ fontSize: 10, color: "#9ca3af" }}>{label}</span>
+          <span style={{ fontSize: 11 }}>{COLORS[category].icon}</span>
+          <span style={{ fontSize: 10, color: COLORS[category].text, fontWeight: 500 }}>{label}</span>
         </div>
       ))}
     </div>
@@ -784,7 +778,7 @@ function Legend() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Stats bar with hover lists                                         */
+/*  Stats bar with hover dropdown lists                                */
 /* ------------------------------------------------------------------ */
 
 function StatsBar({ data }: { data: Record<string, unknown> }) {
@@ -792,7 +786,6 @@ function StatsBar({ data }: { data: Record<string, unknown> }) {
 
   const episodes = (data.episodes as Record<string, unknown>[]) || [];
 
-  // Build lists for hover
   const deptSet = new Map<string, number>();
   const diagSet = new Map<string, number>();
   const docSet = new Map<string, number>();
@@ -820,11 +813,11 @@ function StatsBar({ data }: { data: Record<string, unknown> }) {
   const sortedDiags = Array.from(diagSet.entries()).sort((a, b) => b[1] - a[1]);
   const sortedDocs = Array.from(docSet.entries()).sort((a, b) => b[1] - a[1]);
 
-  const stats: { label: string; value: number; list: [string, number][] }[] = [
-    { label: "Episodes", value: episodes.length, list: [] },
-    { label: "Departments", value: deptSet.size, list: sortedDepts },
-    { label: "Diagnoses", value: diagSet.size, list: sortedDiags },
-    { label: "Doctors", value: docSet.size, list: sortedDocs },
+  const stats: { label: string; value: number; color: string; list: [string, number][] }[] = [
+    { label: "Episodes", value: episodes.length, color: COLORS.episode.border, list: [] },
+    { label: "Departments", value: deptSet.size, color: COLORS.department.border, list: sortedDepts },
+    { label: "Diagnoses", value: diagSet.size, color: COLORS.diagnosis.border, list: sortedDiags },
+    { label: "Doctors", value: docSet.size, color: COLORS.doctor.border, list: sortedDocs },
   ];
 
   return (
@@ -834,24 +827,32 @@ function StatsBar({ data }: { data: Record<string, unknown> }) {
         top: 12,
         right: 12,
         display: "flex",
-        gap: 16,
-        background: "rgba(17,17,20,0.85)",
-        backdropFilter: "blur(8px)",
-        borderRadius: 10,
-        padding: "8px 16px",
+        gap: 2,
+        background: "rgba(10,10,14,0.9)",
+        backdropFilter: "blur(12px)",
+        borderRadius: 12,
+        padding: "6px 4px",
         border: "1px solid rgba(255,255,255,0.08)",
         zIndex: 10,
       }}
     >
-      {stats.map(({ label, value, list }) => (
+      {stats.map(({ label, value, color, list }) => (
         <div
           key={label}
-          style={{ textAlign: "center", position: "relative", cursor: list.length > 0 ? "pointer" : "default" }}
+          style={{
+            textAlign: "center",
+            position: "relative",
+            cursor: list.length > 0 ? "pointer" : "default",
+            padding: "4px 14px",
+            borderRadius: 8,
+            background: hoveredStat === label ? "rgba(255,255,255,0.05)" : "transparent",
+            transition: "background 0.2s",
+          }}
           onMouseEnter={() => list.length > 0 && setHoveredStat(label)}
           onMouseLeave={() => setHoveredStat(null)}
         >
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#e5e7eb" }}>{value}</div>
-          <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color, lineHeight: 1.2 }}>{value}</div>
+          <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>
             {label}
           </div>
 
@@ -862,39 +863,50 @@ function StatsBar({ data }: { data: Record<string, unknown> }) {
                 position: "absolute",
                 top: "100%",
                 right: 0,
-                marginTop: 6,
-                background: "rgba(17,17,20,0.95)",
-                backdropFilter: "blur(12px)",
-                border: "1px solid rgba(255,255,255,0.1)",
-                borderRadius: 10,
+                marginTop: 8,
+                background: "linear-gradient(180deg, rgba(15,15,20,0.97), rgba(10,10,14,0.97))",
+                backdropFilter: "blur(16px)",
+                border: `1px solid ${color}30`,
+                borderRadius: 12,
                 padding: "8px 0",
-                minWidth: 240,
-                maxWidth: 380,
-                maxHeight: 320,
+                minWidth: 260,
+                maxWidth: 400,
+                maxHeight: 340,
                 overflowY: "auto",
                 zIndex: 100,
                 textAlign: "left",
-                boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
+                boxShadow: `0 12px 40px rgba(0,0,0,0.7), 0 0 12px ${color}15`,
               }}
             >
-              <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, padding: "2px 12px 6px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+              <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.8, padding: "4px 14px 8px", borderBottom: `1px solid ${color}15`, fontWeight: 600 }}>
                 {label} ({list.length})
               </div>
               {list.map(([name, count], i) => (
                 <div
                   key={i}
                   style={{
-                    fontSize: 10,
+                    fontSize: 11,
                     color: "#d1d5db",
-                    padding: "4px 12px",
-                    borderBottom: "1px solid rgba(255,255,255,0.03)",
+                    padding: "6px 14px",
+                    borderBottom: i < list.length - 1 ? "1px solid rgba(255,255,255,0.03)" : "none",
                     display: "flex",
                     justifyContent: "space-between",
-                    gap: 8,
+                    gap: 10,
+                    transition: "background 0.15s",
                   }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.04)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
                 >
                   <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{name}</span>
-                  <span style={{ color: "#6b7280", flexShrink: 0 }}>{count}x</span>
+                  <span style={{
+                    color,
+                    flexShrink: 0,
+                    fontWeight: 600,
+                    fontSize: 10,
+                    background: `${color}15`,
+                    padding: "1px 6px",
+                    borderRadius: 6,
+                  }}>{count}x</span>
                 </div>
               ))}
             </div>
@@ -925,7 +937,6 @@ export function KnowledgeGraph({ patientData, onClose }: KnowledgeGraphProps) {
     return cat ? COLORS[cat]?.border || "#6b7280" : "#6b7280";
   }, []);
 
-  // Close on backdrop click
   const handleBackdropClick = useCallback(
     (e: React.MouseEvent) => {
       if (e.target === backdropRef.current) {
@@ -938,24 +949,68 @@ export function KnowledgeGraph({ patientData, onClose }: KnowledgeGraphProps) {
   return (
     <div
       ref={backdropRef}
-      className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3"
+      style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(4px)" }}
       onClick={handleBackdropClick}
     >
-      <div className="w-full h-full max-w-[95vw] max-h-[92vh] bg-[#0d0d10] rounded-2xl border border-white/10 flex flex-col overflow-hidden shadow-2xl">
+      <div
+        className="w-full h-full max-w-[96vw] max-h-[94vh] flex flex-col overflow-hidden"
+        style={{
+          background: "linear-gradient(180deg, #0d0d12, #08080c)",
+          borderRadius: 16,
+          border: "1px solid rgba(255,255,255,0.08)",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.6), 0 0 1px rgba(255,255,255,0.1)",
+        }}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 bg-[#111114]">
-          <div className="flex items-center gap-3">
-            <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-            <h2 className="text-sm font-semibold text-gray-200 tracking-wide">
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "12px 20px",
+            borderBottom: "1px solid rgba(255,255,255,0.06)",
+            background: "linear-gradient(180deg, rgba(20,20,28,0.8), transparent)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: "linear-gradient(135deg, #818cf8, #6366f1)",
+                boxShadow: "0 0 12px rgba(129,140,248,0.5)",
+                animation: "pulse 2s infinite",
+              }}
+            />
+            <h2 style={{ fontSize: 14, fontWeight: 700, color: "#e5e7eb", letterSpacing: 0.3 }}>
               Patient Knowledge Graph
             </h2>
-            <span className="text-xs text-gray-500 ml-2">
+            <span style={{ fontSize: 11, color: "#6b7280", marginLeft: 4 }}>
               {nodes.length} nodes &middot; {edges.length} relationships
             </span>
           </div>
           <button
             onClick={onClose}
-            className="text-gray-500 hover:text-gray-200 transition-colors text-lg px-2 py-1 rounded hover:bg-white/5"
+            style={{
+              color: "#6b7280",
+              fontSize: 18,
+              padding: "4px 10px",
+              borderRadius: 8,
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              transition: "all 0.2s",
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.06)";
+              (e.currentTarget as HTMLButtonElement).style.color = "#e5e7eb";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+              (e.currentTarget as HTMLButtonElement).style.color = "#6b7280";
+            }}
             aria-label="Close knowledge graph"
           >
             &times;
@@ -963,7 +1018,7 @@ export function KnowledgeGraph({ patientData, onClose }: KnowledgeGraphProps) {
         </div>
 
         {/* Graph */}
-        <div className="flex-1 relative">
+        <div style={{ flex: 1, position: "relative" }}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -993,9 +1048,9 @@ export function KnowledgeGraph({ patientData, onClose }: KnowledgeGraphProps) {
               nodeColor={minimapNodeColor}
               maskColor="rgba(0,0,0,0.7)"
               style={{
-                background: "#111114",
-                border: "1px solid rgba(255,255,255,0.08)",
-                borderRadius: 8,
+                background: "#0d0d12",
+                border: "1px solid rgba(255,255,255,0.06)",
+                borderRadius: 10,
                 height: 100,
                 width: 150,
               }}

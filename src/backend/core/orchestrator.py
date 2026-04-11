@@ -216,7 +216,7 @@ class Orchestrator:
         if route.needs_research:
             agent_map["research"] = (self.research, self.research.search, (message, route.guideline_countries))
         if route.needs_drug:
-            agent_map["drug"] = (self.drug, self.drug.analyze, (message, patient_context))
+            agent_map["drug"] = (self.drug, self.drug.analyze, (message, patient_context, route.priority_country))
         if not agent_map:
             agent_map["clinical"] = (self.clinical, self.clinical.analyze, (message, patient_context, history))
 
