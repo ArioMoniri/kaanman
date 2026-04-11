@@ -16,9 +16,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import os as _os_module
+
 SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
 COOKIES_DIR = Path(__file__).resolve().parents[3] / "cookies"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DATA_DIR = Path(_os_module.environ.get("PATIENT_DATA_DIR", str(PROJECT_ROOT)))
 
 log = logging.getLogger("cerebralink.episodes")
 
@@ -30,7 +33,7 @@ def _normalize_protocol_id(pid: str) -> str:
 
 def _episodes_dir(protocol_id: str) -> Path:
     """Return the output directory for a patient's episodes."""
-    return PROJECT_ROOT / f"episodes_{protocol_id}"
+    return DATA_DIR / f"episodes_{protocol_id}"
 
 
 def episodes_exist(protocol_id: str) -> bool:
@@ -134,7 +137,7 @@ async def auto_fetch_episodes(protocol_id: str) -> dict[str, Any]:
             capture_output=True,
             text=True,
             timeout=300,
-            cwd=str(PROJECT_ROOT),
+            cwd=str(DATA_DIR),
             env=env,
         )
         if proc.returncode != 0:

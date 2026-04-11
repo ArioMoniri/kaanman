@@ -107,10 +107,10 @@ function GraphNode({ data }: { data: GraphNodeData }) {
             ? `linear-gradient(135deg, ${palette.bg}, ${palette.bgEnd})`
             : `linear-gradient(180deg, ${palette.bg}, ${palette.bgEnd})`,
           border: `${isFocused ? "2.5px" : "1.5px"} solid ${isFocused ? palette.border : `${palette.border}${hovered ? "" : "80"}`}`,
-          borderRadius: isCenter ? 20 : 14,
-          padding: isCenter ? "16px 20px" : "10px 14px",
-          minWidth: isCenter ? 160 : 110,
-          maxWidth: isCenter ? 200 : 180,
+          borderRadius: isCenter ? 20 : 12,
+          padding: isCenter ? "16px 22px" : "10px 14px",
+          minWidth: isCenter ? 170 : 115,
+          maxWidth: isCenter ? 210 : 185,
           boxShadow: isFocused
             ? `0 0 40px ${palette.glow}, 0 0 80px ${palette.glow}, 0 4px 20px rgba(0,0,0,0.5)`
             : hovered
@@ -757,7 +757,10 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
 /*  Legend component — pill-style with category colors                  */
 /* ------------------------------------------------------------------ */
 
-function Legend() {
+function Legend({ hiddenCategories, onToggleCategory }: {
+  hiddenCategories: Set<NodeCategory>;
+  onToggleCategory: (cat: NodeCategory) => void;
+}) {
   const items: { category: NodeCategory; label: string }[] = [
     { category: "patient", label: "Patient" },
     { category: "department", label: "Department" },
@@ -776,22 +779,50 @@ function Legend() {
         bottom: 12,
         left: 12,
         display: "flex",
-        flexWrap: "wrap",
-        gap: 8,
-        background: "rgba(10,10,14,0.9)",
-        backdropFilter: "blur(12px)",
-        borderRadius: 12,
-        padding: "10px 16px",
+        flexDirection: "column",
+        gap: 4,
+        background: "linear-gradient(180deg, rgba(13,13,18,0.95), rgba(8,8,12,0.95))",
+        backdropFilter: "blur(16px)",
+        borderRadius: 14,
+        padding: "12px 14px",
         border: "1px solid rgba(255,255,255,0.08)",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
         zIndex: 10,
       }}
     >
-      {items.map(({ category, label }) => (
-        <div key={category} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ fontSize: 11 }}>{COLORS[category].icon}</span>
-          <span style={{ fontSize: 10, color: COLORS[category].text, fontWeight: 500 }}>{label}</span>
-        </div>
-      ))}
+      <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, marginBottom: 2, paddingLeft: 2 }}>
+        Filter Categories
+      </div>
+      {items.map(({ category, label }) => {
+        const isHidden = hiddenCategories.has(category);
+        return (
+          <button
+            key={category}
+            onClick={() => category !== "patient" && onToggleCategory(category)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "5px 8px",
+              borderRadius: 8,
+              border: "none",
+              cursor: category === "patient" ? "default" : "pointer",
+              background: isHidden ? "rgba(255,255,255,0.02)" : `${COLORS[category].border}12`,
+              opacity: isHidden ? 0.4 : 1,
+              transition: "all 0.2s",
+            }}
+          >
+            <div style={{
+              width: 10, height: 10, borderRadius: 3,
+              background: isHidden ? "#333" : COLORS[category].border,
+              border: `1.5px solid ${isHidden ? "#444" : COLORS[category].border}`,
+              transition: "all 0.2s",
+            }} />
+            <span style={{ fontSize: 11 }}>{COLORS[category].icon}</span>
+            <span style={{ fontSize: 11, color: isHidden ? "#4b5563" : COLORS[category].text, fontWeight: 500 }}>{label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -956,6 +987,16 @@ export function KnowledgeGraph({
   const hasEpisodes = episodeManifest && episodeManifest.length > 0;
   const [activeTab, setActiveTab] = useState<"patient" | "reports" | "episodes">("patient");
   const [graphSource, setGraphSource] = useState<"local" | "neo4j">("local");
+  const [hiddenCategories, setHiddenCategories] = useState<Set<NodeCategory>>(new Set());
+
+  const toggleCategory = useCallback((cat: NodeCategory) => {
+    setHiddenCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
+  }, []);
   const inlineGraph = useMemo(() => buildGraph(patientData), [patientData]);
 
   // Neo4j graph data (fetched async, falls back to inline)
@@ -1021,13 +1062,29 @@ export function KnowledgeGraph({
     });
   }, [initialGraph.nodes, focusLabel]);
 
-  const [nodes, setNodes] = useState<Node[]>(nodesWithFocus);
-  const edges = initialGraph.edges;
+  // Filter by hidden categories
+  const filteredNodes = useMemo(() => {
+    if (hiddenCategories.size === 0) return nodesWithFocus;
+    return nodesWithFocus.filter((n) => {
+      const cat = (n.data as GraphNodeData).category;
+      return !hiddenCategories.has(cat);
+    });
+  }, [nodesWithFocus, hiddenCategories]);
 
-  // Update nodes when graph source changes
+  const filteredNodeIds = useMemo(() => new Set(filteredNodes.map((n) => n.id)), [filteredNodes]);
+
+  const filteredEdges = useMemo(() => {
+    if (hiddenCategories.size === 0) return initialGraph.edges;
+    return initialGraph.edges.filter((e) => filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target));
+  }, [initialGraph.edges, hiddenCategories, filteredNodeIds]);
+
+  const [nodes, setNodes] = useState<Node[]>(filteredNodes);
+  const edges = filteredEdges;
+
+  // Update nodes when graph source or filters change
   useEffect(() => {
-    setNodes(nodesWithFocus);
-  }, [nodesWithFocus]);
+    setNodes(filteredNodes);
+  }, [filteredNodes]);
   const backdropRef = useRef<HTMLDivElement>(null);
 
   const onNodesChange: OnNodesChange = useCallback(
@@ -1215,8 +1272,8 @@ export function KnowledgeGraph({
                 maxZoom={2.5}
                 proOptions={{ hideAttribution: true }}
                 defaultEdgeOptions={{
-                  type: "default",
-                  style: { strokeWidth: 1 },
+                  type: "smoothstep",
+                  style: { strokeWidth: 1.2, strokeOpacity: 0.6 },
                 }}
                 onInit={(instance) => {
                   // Auto-zoom to focused node after initial layout
@@ -1239,7 +1296,7 @@ export function KnowledgeGraph({
                   }
                 }}
               >
-                <Background color="#1a1a2e" gap={40} size={1} />
+                <Background color="#1e1e30" gap={32} size={0.6} />
                 <Controls
                   style={{
                     bottom: 12,
@@ -1249,17 +1306,18 @@ export function KnowledgeGraph({
                 />
                 <MiniMap
                   nodeColor={minimapNodeColor}
-                  maskColor="rgba(0,0,0,0.7)"
+                  maskColor="rgba(0,0,0,0.65)"
                   style={{
-                    background: "#0d0d12",
+                    background: "rgba(13,13,18,0.9)",
                     border: "1px solid rgba(255,255,255,0.06)",
-                    borderRadius: 10,
-                    height: 100,
-                    width: 150,
+                    borderRadius: 12,
+                    height: 110,
+                    width: 160,
+                    boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
                   }}
                 />
               </ReactFlow>
-              <Legend />
+              <Legend hiddenCategories={hiddenCategories} onToggleCategory={toggleCategory} />
               <StatsBar data={patientData} />
             </>
           ) : activeTab === "reports" && hasReports && onOpenReport ? (

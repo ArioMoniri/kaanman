@@ -42,6 +42,9 @@ interface Citation {
   year?: number;
   url?: string;
   quote: string;
+  importance?: "high" | "medium" | "low";
+  effect_size?: "large" | "moderate" | "small" | "none";
+  evidence_level?: string;
 }
 
 interface AgentTiming {
@@ -122,13 +125,27 @@ function getEffectBadgeVariant(
   total: number,
   priorityCountry?: string
 ): BadgeVariant {
+  // WHO sources get teal badge
   if (citation.country === "WHO") return "teal-subtle";
+  // Priority-country sources get amber badge
   if (priorityCountry && citation.country === priorityCountry) return "amber";
-  const position = index / Math.max(total, 1);
+
+  // Use structured importance/effect_size if available (from AI scorer)
+  if (citation.importance || citation.effect_size) {
+    if (citation.importance === "high" || citation.effect_size === "large") return "green";
+    if (citation.importance === "medium" || citation.effect_size === "moderate") return "blue";
+    if (citation.importance === "low" || citation.effect_size === "small") return "purple-subtle";
+    return "gray-subtle";
+  }
+
+  // Fallback heuristics when structured data is absent
   const hasQuote = citation.quote && citation.quote.length > 20;
-  if (position < 0.33 || (position < 0.5 && hasQuote)) return "green";
-  if (position < 0.66) return "blue";
-  if (hasQuote) return "purple-subtle";
+  const hasUrl = !!citation.url;
+  const isRecent = citation.year && citation.year >= new Date().getFullYear() - 3;
+  // Strong evidence signals: has supporting quote + URL + recent
+  if ((hasQuote && hasUrl) || isRecent) return "green";
+  if (hasQuote || hasUrl) return "blue";
+  if (index < Math.ceil(total * 0.4)) return "purple-subtle";
   return "gray-subtle";
 }
 
@@ -249,10 +266,23 @@ function InlineRefText({ text, citations, onOpenReferenceUrl, onOpenReferences }
   );
 }
 
-/** Pre-process markdown text: replace [N] with placeholder links for markdown renderer */
+/** Pre-process markdown text: replace [N] with placeholder links for markdown renderer.
+ *  Protects LaTeX blocks and code spans from modification. */
 function preprocessInlineRefs(text: string): string {
+  // Protect LaTeX and code from [N] replacement
+  const placeholders: string[] = [];
+  const protect = (m: string) => { placeholders.push(m); return `\x01REF${placeholders.length - 1}\x01`; };
+  let safe = text;
+  safe = safe.replace(/\$\$[\s\S]*?\$\$/g, protect);   // display LaTeX
+  safe = safe.replace(/\$[^$\n]+?\$/g, protect);        // inline LaTeX
+  safe = safe.replace(/`[^`]+`/g, protect);              // inline code
+
   // Replace [N] with markdown-compatible link: [⟨N⟩](#cite-N)
-  return text.replace(/\[(\d+)\]/g, "[`[$1]`](#cite-$1)");
+  safe = safe.replace(/\[(\d+)\]/g, "[`[$1]`](#cite-$1)");
+
+  // Restore protected content
+  safe = safe.replace(/\x01REF(\d+)\x01/g, (_, idx) => placeholders[parseInt(idx)]);
+  return safe;
 }
 
 /** Pharmaceutical name suffixes — matches generic drug names with high specificity */
@@ -939,6 +969,21 @@ export function MessageBubble({
                           {c.year && (
                             <span className="text-gray-500 text-[10px]">
                               {c.year}
+                            </span>
+                          )}
+                          {c.importance && (
+                            <Badge variant={c.importance === "high" ? "green" : c.importance === "medium" ? "blue" : "gray-subtle"} size="sm">
+                              {c.importance}
+                            </Badge>
+                          )}
+                          {c.effect_size && c.effect_size !== "none" && (
+                            <Badge variant={c.effect_size === "large" ? "green" : c.effect_size === "moderate" ? "blue" : "purple-subtle"} size="sm">
+                              {c.effect_size} effect
+                            </Badge>
+                          )}
+                          {c.evidence_level && (
+                            <span className="text-[9px] text-gray-500 font-medium bg-surface/80 px-1.5 py-0.5 rounded">
+                              {c.evidence_level}
                             </span>
                           )}
                           {c.url && (

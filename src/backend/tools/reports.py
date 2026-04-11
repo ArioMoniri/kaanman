@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import re
 import subprocess
 import sys
@@ -22,6 +23,8 @@ from urllib.parse import quote
 SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
 COOKIES_DIR = Path(__file__).resolve().parents[3] / "cookies"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+# Persistent data directory — set PATIENT_DATA_DIR env var in Docker to a volume mount
+DATA_DIR = Path(os.environ.get("PATIENT_DATA_DIR", str(PROJECT_ROOT)))
 
 log = logging.getLogger("cerebralink.reports")
 
@@ -39,7 +42,7 @@ def _normalize_protocol_id(pid: str) -> str:
 
 def _reports_dir(protocol_id: str) -> Path:
     """Return the output directory for a patient's reports."""
-    return PROJECT_ROOT / f"reports_{protocol_id}"
+    return DATA_DIR / f"reports_{protocol_id}"
 
 
 # ── PACS URL generation (inline, no subprocess needed) ──

@@ -59,9 +59,11 @@ services:
       - MEDICAL_MCP_URL=http://medical-mcp:3001
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_AUTH=neo4j/cerebralink2024
+      - PATIENT_DATA_DIR=/app/patient_data
     volumes:
       - ./cookies:/app/cookies:ro
       - ./scripts:/app/scripts:ro
+      - patient-data:/app/patient_data
     depends_on:
       redis:
         condition: service_healthy
@@ -88,3 +90,4 @@ services:
 volumes:
   redis-data:
   neo4j-data:
+  patient-data:
