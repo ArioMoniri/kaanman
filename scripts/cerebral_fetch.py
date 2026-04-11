@@ -495,7 +495,7 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    p.add_argument("patient_id", help="Patient ID (e.g. 30256609)")
+    p.add_argument("patient_id", help="Patient ID (e.g. 30256609 or '7021 4897')")
     p.add_argument("--cookie-file", help="Read cookie string from file")
     p.add_argument("--cookie", help="Cookie string as inline arg (visible in shell history — avoid)")
     p.add_argument("--output", "-o", help="Output file path (default: patient_<id>_<timestamp>.json in cwd)")
@@ -503,8 +503,11 @@ def main() -> int:
     p.add_argument("--pretty", action="store_true", default=True, help="Pretty-print JSON (default: true)")
     args = p.parse_args()
 
+    # Normalise protocol ID: strip spaces/dashes so "7021 4897" → "70214897"
+    args.patient_id = re.sub(r"[\s\-]+", "", args.patient_id)
+
     if not re.fullmatch(r"\d+", args.patient_id):
-        err("patient_id must be numeric")
+        err("patient_id must be numeric (e.g. 30256609 or '7021 4897')")
         return 2
 
     try:

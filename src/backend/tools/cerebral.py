@@ -6,6 +6,7 @@ Wraps cerebral_cookie_from_json.py and cerebral_fetch.py as Python calls.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -39,6 +40,11 @@ async def ingest_cookies_json(cookies_json_str: str) -> dict[str, Any]:
     return {"cookie_string": cookie_string, "status": "cookie_ready"}
 
 
+def _normalize_protocol_id(pid: str) -> str:
+    """Strip spaces/dashes from protocol IDs: '7021 4897' → '70214897'."""
+    return re.sub(r"[\s\-]+", "", pid.strip())
+
+
 async def fetch_patient(patient_id: str, cookie_string: str) -> dict[str, Any]:
     """Fetch a patient record from Cerebral Plus using the cookie string.
 
@@ -48,6 +54,7 @@ async def fetch_patient(patient_id: str, cookie_string: str) -> dict[str, Any]:
     If the fetch times out, we retry with --max-episodes to get partial
     data (newest episodes first) rather than returning nothing.
     """
+    patient_id = _normalize_protocol_id(patient_id)
     fetch_script = SCRIPTS_DIR / "cerebral_fetch.py"
     if not fetch_script.exists():
         raise FileNotFoundError(f"Fetch script not found: {fetch_script}")
@@ -117,7 +124,9 @@ async def auto_fetch_patient(protocol_id: str) -> dict[str, Any]:
 
     This is the main entry point when a doctor types a protocol number
     in the chat (e.g., "73524705 bu hastaya atenolol baslayabilir miyim").
+    Accepts both '73524705' and '7352 4705' formats.
     """
+    protocol_id = _normalize_protocol_id(protocol_id)
     cookies_file = COOKIES_DIR / "cookies.json"
     if not cookies_file.exists():
         raise FileNotFoundError(

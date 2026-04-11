@@ -26,6 +26,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -57,6 +58,8 @@ def convert_cookies(cookies_path: Path) -> str:
 
 def fetch_patient(patient_id: str, cookie_string: str) -> dict:
     """Run cerebral_fetch.py to get the patient record."""
+    # Normalise: "7021 4897" → "70214897"
+    patient_id = re.sub(r"[\s\-]+", "", patient_id.strip())
     script = SCRIPTS_DIR / "cerebral_fetch.py"
     proc = subprocess.run(
         [sys.executable, str(script), patient_id, "--stdout", "--cookie", cookie_string],

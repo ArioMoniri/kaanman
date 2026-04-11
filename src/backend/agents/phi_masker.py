@@ -28,9 +28,10 @@ _PATTERNS = {
 }
 
 # Protocol/patient IDs (7-9 digits) are NOT PHI — they are internal system IDs
-# used by the scraper. Do NOT mask them. Also match spaced variants like "7021 4897".
+# used by the scraper. Do NOT mask them. Also match spaced/dashed variants like
+# "7021 4897", "70 21 48 97", "7021-4897".
 _PROTOCOL_RE = re.compile(r"\b\d{7,9}\b")
-_PROTOCOL_SPACED_RE = re.compile(r"\b\d{3,5}\s+\d{3,5}\b")
+_PROTOCOL_SPACED_RE = re.compile(r"\b\d{2,5}[\s\-]+(?:\d{2,5}[\s\-]+)*\d{2,5}\b")
 
 
 class PhiMasker(BaseAgent):
