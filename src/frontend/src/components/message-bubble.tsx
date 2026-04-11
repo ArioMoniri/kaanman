@@ -134,8 +134,17 @@ function extractHighlights(text: string): string[] {
   return scored.filter((s) => s.score > 0).slice(0, 8).map((s) => s.text);
 }
 
-/** Animated highlight component */
-function HighlightedContent({ highlights }: { highlights: string[] }) {
+/** Extract clinical alert lines (⚠️ ALERT: or ⚠️ CRITICAL:) from the answer */
+function extractAlerts(text: string): string[] {
+  if (!text) return [];
+  const lines = text.split("\n");
+  return lines
+    .map((l) => l.replace(/^[-*•]\s*/, "").trim())
+    .filter((l) => /⚠️\s*(ALERT|CRITICAL):/i.test(l) || /^CRITICAL:/i.test(l));
+}
+
+/** Animated highlight component with markdown + clickable references */
+function HighlightedContent({ highlights, onOpenReferenceUrl }: { highlights: string[]; onOpenReferenceUrl?: (url: string, title: string) => void }) {
   const [visibleCount, setVisibleCount] = useState(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -163,25 +172,31 @@ function HighlightedContent({ highlights }: { highlights: string[] }) {
 
   return (
     <div className="space-y-2.5">
-      {highlights.map((h, i) => (
-        <div
-          key={i}
-          className={`transition-all duration-500 ${
-            i < visibleCount
-              ? "opacity-100 translate-y-0"
-              : "opacity-0 translate-y-2"
-          }`}
-        >
-          <div className="flex gap-2.5 items-start">
-            <span className="mt-1.5 w-2 h-2 rounded-full bg-amber-400 shrink-0 animate-pulse" />
-            <span className="text-base text-gray-200 leading-relaxed">
-              <span className="bg-amber-400/15 px-0.5 rounded">
-                {h.startsWith("**") ? h.slice(2).replace(/\*\*$/, "") : h}
-              </span>
-            </span>
+      {highlights.map((h, i) => {
+        const isAlert = h.includes("ALERT:") || h.includes("CRITICAL:");
+        return (
+          <div
+            key={i}
+            className={`transition-all duration-500 ${
+              i < visibleCount
+                ? "opacity-100 translate-y-0"
+                : "opacity-0 translate-y-2"
+            }`}
+          >
+            <div className={`flex gap-2.5 items-start ${isAlert ? "bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2" : ""}`}>
+              <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 animate-pulse ${isAlert ? "bg-red-400" : "bg-amber-400"}`} />
+              <div className="text-base text-gray-200 leading-relaxed flex-1 prose-content">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={markdownComponents(onOpenReferenceUrl)}
+                >
+                  {h}
+                </ReactMarkdown>
+              </div>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -347,6 +362,9 @@ export function MessageBubble({
   const highlights = hasDualMode
     ? extractHighlights(message.complete_answer!)
     : [];
+
+  // Extract clinical alert lines from the current display content
+  const alerts = extractAlerts(displayContent);
   const hasCitations = message.citations && message.citations.length > 0;
   const hasGuidelines =
     message.guidelines_used && message.guidelines_used.length > 0;
@@ -440,10 +458,26 @@ export function MessageBubble({
           </div>
         </div>
 
+        {/* Clinical alerts */}
+        {alerts.length > 0 && (
+          <div className="mx-5 mb-2 space-y-1.5">
+            {alerts.map((alert, i) => (
+              <div key={i} className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30">
+                <span className="text-red-400 text-lg leading-none shrink-0 mt-0.5">&#9888;</span>
+                <div className="text-sm text-red-200 leading-relaxed flex-1 prose-content">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents(onOpenReferenceUrl)}>
+                    {alert.replace(/^⚠️\s*ALERT:\s*/i, "").replace(/^⚠️\s*CRITICAL:\s*/i, "")}
+                  </ReactMarkdown>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Answer content */}
         <div className="px-5 pb-4">
           {mode === "highlight" && hasDualMode ? (
-            <HighlightedContent highlights={highlights} />
+            <HighlightedContent highlights={highlights} onOpenReferenceUrl={onOpenReferenceUrl} />
           ) : (
             <MarkdownContent content={displayContent} onOpenReferenceUrl={onOpenReferenceUrl} />
           )}

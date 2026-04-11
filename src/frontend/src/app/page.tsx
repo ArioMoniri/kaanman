@@ -320,12 +320,9 @@ export default function Home() {
   }, [sessionId]);
 
   return (
-    <div className="flex h-screen">
-      {/* Left sidebar spacer */}
-      <div className="hidden lg:block lg:w-[15%] xl:w-[20%] shrink-0" />
-
-      {/* Main chat area — centered, max 720px */}
-      <div className={`flex flex-col flex-1 min-w-0 max-w-[720px] mx-auto transition-all ${showReferences ? "mr-0" : ""}`}>
+    <div className="flex h-screen relative">
+      {/* Main chat area — always centered */}
+      <div className="flex flex-col mx-auto w-full max-w-[720px] min-w-0">
         {/* Header */}
         <header className="flex items-center justify-between px-6 py-4 border-b border-border/30">
           <div className="flex items-center gap-3">
@@ -410,12 +407,9 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Right sidebar spacer (collapses when references open) */}
-      {!showReferences && <div className="hidden lg:block lg:w-[15%] xl:w-[20%] shrink-0" />}
-
-      {/* Reference Sidebar (right) */}
+      {/* Reference Sidebar — fixed to right edge, overlays content */}
       {showReferences && latestRefMsg && (
-        <div className="w-[420px] shrink-0 border-l border-border/30">
+        <div className="fixed top-0 right-0 h-screen w-[min(420px,33vw)] z-40 border-l border-border/30 bg-[#131316]">
           <ReferenceSidebar
             citations={latestRefMsg.citations || []}
             guidelines={latestRefMsg.guidelines_used || []}

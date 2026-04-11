@@ -22,7 +22,9 @@ _PATTERNS = {
     "turkish_id": re.compile(r"\b\d{11}\b"),
     "date_of_birth": re.compile(r"\b\d{2}\.\d{2}\.\d{4}\b"),
     "phone": re.compile(r"\b(?:\+90|0)\s*\d{3}\s*\d{3}\s*\d{2}\s*\d{2}\b"),
+    "phone_intl": re.compile(r"\b\+?\d{1,3}[\s-]?\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}\b"),
     "email": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),
+    "turkish_plate": re.compile(r"\b\d{2}\s?[A-Z]{1,3}\s?\d{2,4}\b"),
 }
 
 # Protocol/patient IDs (7-9 digits) are NOT PHI — they are internal system IDs
@@ -65,7 +67,9 @@ Output valid JSON with:
 
     def _regex_prepass(self, text: str) -> str:
         """Fast regex pass to catch obvious PHI before LLM."""
+        text = _PATTERNS["turkish_id"].sub("[TC_ID]", text)
         text = _PATTERNS["phone"].sub("[PHONE]", text)
+        text = _PATTERNS["phone_intl"].sub("[PHONE]", text)
         text = _PATTERNS["email"].sub("[EMAIL]", text)
         return text
 

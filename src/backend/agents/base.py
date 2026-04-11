@@ -51,10 +51,28 @@ class BaseAgent:
 
     async def call_json(self, user_message: str, temperature: float = 0.1) -> dict[str, Any]:
         raw = await self.call(user_message, temperature=temperature)
-        # Extract JSON from response (handle markdown fences)
+        # Extract JSON from response (handle markdown fences + trailing text)
         text = raw.strip()
         if text.startswith("```"):
             lines = text.split("\n")
             lines = [l for l in lines if not l.startswith("```")]
             text = "\n".join(lines)
-        return json.loads(text)
+        # Try direct parse first; on "Extra data" error, extract first JSON object
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            # Find the outermost { ... } block
+            start = text.find("{")
+            if start == -1:
+                raise
+            depth = 0
+            end = start
+            for i, ch in enumerate(text[start:], start):
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+            return json.loads(text[start:end])

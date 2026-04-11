@@ -51,17 +51,46 @@ def _build_context(
         parts.append(f"\nCITATION LIST (use [N] references in your answer):\n" + "\n".join(cite_lines))
 
     if patient_context:
-        diagnoses = []
+        # Build detailed patient timeline with dates
+        patient_info = patient_context.get("patient", patient_context)
+        allergy = patient_info.get("allergy", {})
+        if allergy and isinstance(allergy, dict):
+            parts.append(f"PATIENT ALLERGY INFO: {json.dumps(allergy, ensure_ascii=False)}")
+
         episodes = patient_context.get("episodes", [])
-        for ep in (episodes or [])[:5]:
-            for d in (ep.get("diagnosis") or []):
-                name = d.get("DiagnosisName", "")
-                if name:
-                    diagnoses.append(name)
-        if diagnoses:
-            parts.append(f"PATIENT DIAGNOSIS HISTORY: {'; '.join(diagnoses)}")
+        if episodes:
+            timeline = []
+            for ep in (episodes or [])[:15]:
+                date = ep.get("date", "")
+                service = ep.get("service_name", "")
+                dx_list = []
+                for d in (ep.get("diagnosis") or []):
+                    name = d.get("DiagnosisName", "")
+                    icd = d.get("ICDCode", "")
+                    if name:
+                        dx_list.append(f"{name} ({icd})" if icd else name)
+                exam = (ep.get("examination_text") or "")[:300]
+                entry = f"- {date} | {service}"
+                if dx_list:
+                    entry += f" | Dx: {', '.join(dx_list)}"
+                if exam:
+                    entry += f" | Notes: {exam[:200]}"
+                timeline.append(entry)
+            parts.append(f"\nPATIENT VISIT TIMELINE (newest first):\n" + "\n".join(timeline))
         else:
             parts.append("[Patient context is available — agents had access to it]")
+
+        # Previous medications
+        recipes = patient_info.get("previous_recipes")
+        if recipes and isinstance(recipes, list) and len(recipes) > 0:
+            med_lines = []
+            for rx in recipes[:10]:
+                if isinstance(rx, dict):
+                    med_name = rx.get("MedicineName", rx.get("medicine_name", ""))
+                    if med_name:
+                        med_lines.append(med_name)
+            if med_lines:
+                parts.append(f"MEDICATIONS: {'; '.join(med_lines)}")
 
     for agent_name, output in agent_outputs.items():
         if isinstance(output, dict):
@@ -83,7 +112,7 @@ class FastComposer(BaseAgent):
 
 RULES:
 - Respond in the SAME LANGUAGE as the original question
-- If urgency >= 4: Start with "CRITICAL:" followed by the single most important action
+- If urgency >= 4: Start with "⚠️ CRITICAL:" followed by the single most important action
 - If urgency < 4: Start with the key clinical finding
 - 3-5 bullet points with the most actionable information
 - Include key numbers (doses, lab thresholds, vitals targets)
@@ -91,8 +120,16 @@ RULES:
 - One-line "Bottom line:" summary
 - If a consultation is warranted, add: "→ Consider [specialty] consult"
 - Reference guidelines with [N] citation numbers when available
-- NEVER include patient identifiers or real names
+- NEVER include patient identifiers or real names — use [PATIENT_NAME] if needed
 - Use hedging: "consider", "may warrant"
+
+CRITICAL ALERTS:
+- If you detect a major contraindication, serious drug interaction, or life-threatening condition, mark it with: "⚠️ ALERT:" at the start of that bullet point
+- Mark dangerous combinations, allergies conflicting with prescribed drugs, or red-flag symptoms
+
+PATIENT HISTORY DATES:
+- When mentioning anything from patient history (medications, procedures, diagnoses, lab results), ALWAYS include the DATE it occurred (e.g., "Hepatit B tanısı (03.07.2024)", "Kardiyoloji kontrolü (23.02.2026)")
+- Never say "previously" or "before" without a specific date
 
 Return ONLY the answer text, no JSON wrapping."""
 
@@ -113,10 +150,19 @@ Structure:
 4. **Recommendations**: Specific, actionable next steps
 5. **Consultation Advisory**: Check for cross-condition conflicts. Format: "Consultation suggested: [Specialty] — [reason]"
 6. **Monitoring**: What to track and when
-7. **References**: List each citation as "[N] Source — Title (Year, Country)" with URL if available
+7. **References**: List each citation as "[N] Source — *Title* (Year, Country) — URL" with the URL as a markdown link
+
+CRITICAL ALERTS:
+- If there is a major contraindication, dangerous drug interaction, life-threatening condition, or allergy conflict: write a line starting with "⚠️ ALERT:" explaining the danger. These will be visually highlighted to the doctor.
+- Examples: "⚠️ ALERT: Patient has HBV — immunosuppressive drugs require hepatitis reactivation monitoring"
+
+PATIENT HISTORY DATES:
+- When referencing anything from the patient's history (past diagnoses, medications taken, surgeries, lab results, visits), ALWAYS include the specific DATE (e.g., "HBV serokonversiyonu saptanmış (03.07.2024 — İç Hastalıkları)")
+- Include the department/specialty where it was found when available
+- Never say "previously diagnosed" without giving the date and context
 
 RULES:
-- NEVER include patient identifiers or real names
+- NEVER include patient identifiers or real names — use [PATIENT_NAME] if needed
 - Preserve ALL LaTeX blocks with $$ delimiters — they must render correctly
 - Use proper markdown formatting: **bold**, bullet points, tables with |---|
 - For drug dosing, always include the dose RANGE, not a single number

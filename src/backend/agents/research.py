@@ -37,13 +37,18 @@ For each guideline found, provide:
 - source: publishing organization
 - country: country/region code (UK, USA, Europe, WHO, Turkey)
 - year: publication year
+- url: ALWAYS include the URL from search results — this is CRITICAL for linking references
 - key_recommendation: the relevant recommendation
 - evidence_level: strength of recommendation if stated
+
+IMPORTANT: ALWAYS extract and include the URL for each guideline from the search results.
+The URLs are essential — they are shown as clickable links to doctors reviewing guidelines.
+If a search result has a URL, you MUST include it. Never set url to null if a URL is available.
 
 Respond with structured JSON:
 {
   "guidelines": [
-    {"title": "...", "source": "...", "country": "...", "year": 2024, "url": null, "key_recommendation": "..."}
+    {"title": "...", "source": "...", "country": "...", "year": 2024, "url": "https://...", "key_recommendation": "..."}
   ],
   "synthesis": "Brief synthesis of what the guidelines say collectively",
   "disagreements": "Any notable disagreements between guidelines, or 'None'"
