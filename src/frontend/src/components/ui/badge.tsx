@@ -67,7 +67,7 @@ export function Badge({
   title,
 }: BadgeProps) {
   const cls = clsx(
-    "inline-flex justify-center items-center shrink-0 rounded-[9999px] font-sans font-medium whitespace-nowrap tabular-nums",
+    "inline-flex justify-center items-center shrink-0 rounded-[9999px] font-sans font-medium whitespace-nowrap tabular-nums max-w-full overflow-hidden text-ellipsis",
     capitalize && "capitalize",
     variants[variant],
     sizes[size],

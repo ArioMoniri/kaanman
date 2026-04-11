@@ -6,6 +6,7 @@ Searches for country-specific guidelines and identifies source/year.
 from __future__ import annotations
 
 import json
+from datetime import date
 from typing import Any
 
 from src.backend.agents.base import BaseAgent
@@ -76,13 +77,21 @@ Respond with structured JSON:
         if not search_context:
             search_context.append("No external search results available. Use your training knowledge.")
 
+        today = date.today().isoformat()
         prompt = f"""Find the latest clinical guidelines relevant to this query.
 Target countries: {', '.join(countries)}
+TODAY'S DATE: {today}
 
 QUERY: {query}
 
 SEARCH RESULTS:
 {chr(10).join(search_context)}
+
+IMPORTANT DATE RULES:
+- Today is {today}. Only cite guidelines that are current as of this date.
+- Prefer guidelines published within the last 2 years ({date.today().year - 1}–{date.today().year}).
+- If multiple versions exist, ALWAYS cite the most recent one (e.g., "GINA 2024" not "GINA 2019").
+- Include the year field for every guideline so the doctor can verify recency.
 
 CRITICAL: For the "url" field in each guideline, copy the EXACT full URL from the search results above.
 Do NOT shorten URLs to just the domain (e.g., do NOT write "https://ginasthma.org" if the full URL was

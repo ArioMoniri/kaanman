@@ -111,27 +111,71 @@ function getEffectBadgeVariant(
   return "gray-subtle";
 }
 
-/** Extract key sentences from the complete answer for highlighting */
+/** Extract key content blocks from the complete answer for highlighting.
+ *  Preserves LaTeX blocks, headings, and structured content as whole units.
+ */
 function extractHighlights(text: string): string[] {
-  const sentences = text.split(/(?<=[.!?])\s+/);
+  if (!text) return [];
+
+  // Step 1: Split text into blocks — preserve LaTeX groups together
+  // First, protect LaTeX blocks by collecting them, then split by paragraphs/sections
+  const blocks: string[] = [];
+
+  // Split by double newline (paragraphs) or by headings
+  const rawBlocks = text.split(/\n{2,}/).filter((b) => b.trim());
+
+  for (const block of rawBlocks) {
+    const trimmed = block.trim();
+    if (!trimmed) continue;
+
+    // If block contains LaTeX, keep it as one unit (may span multiple lines)
+    if (trimmed.includes("$$")) {
+      blocks.push(trimmed);
+      continue;
+    }
+
+    // If block is a heading + content, keep together
+    if (trimmed.startsWith("#") || trimmed.startsWith("**")) {
+      blocks.push(trimmed);
+      continue;
+    }
+
+    // Otherwise split by sentences but keep reasonable chunks
+    const sentences = trimmed.split(/(?<=[.!?])\s+/).filter((s) => s.trim());
+    if (sentences.length <= 3) {
+      blocks.push(trimmed);
+    } else {
+      for (const s of sentences) {
+        blocks.push(s);
+      }
+    }
+  }
+
+  // Step 2: Score each block for clinical relevance
   const keywords = [
     "recommend", "important", "critical", "essential", "warning",
     "contraindicated", "first-line", "gold standard", "evidence",
     "strongly", "must", "should not", "avoid", "risk", "significant",
-    "key", "primary", "diagnosis", "treatment", "monitor",
+    "key", "primary", "diagnosis", "treatment", "monitor", "formula",
+    "target", "alert", "calculate", "dose", "guideline", "per ",
   ];
-  const scored = sentences.map((s) => {
+
+  const scored = blocks.map((s) => {
     const lower = s.toLowerCase();
     let score = 0;
     for (const kw of keywords) {
       if (lower.includes(kw)) score++;
     }
-    if (s.startsWith("**")) score += 2;
-    if (lower.includes("$$")) score += 1;
+    if (s.startsWith("**") || s.startsWith("#")) score += 2;
+    if (s.includes("$$")) score += 3; // LaTeX formulas are high-value
+    if (/\[\d+\]/.test(s)) score += 1; // Has inline references
+    if (/⚠️|ALERT|CRITICAL/i.test(s)) score += 3;
+    if (s.includes("→") || s.includes("—")) score += 1; // Clinical reasoning
     return { text: s, score };
   });
+
   scored.sort((a, b) => b.score - a.score);
-  return scored.filter((s) => s.score > 0).slice(0, 8).map((s) => s.text);
+  return scored.filter((s) => s.score > 0).slice(0, 12).map((s) => s.text);
 }
 
 /** Extract clinical alert lines (⚠️ ALERT: or ⚠️ CRITICAL:) from the answer */
@@ -143,20 +187,70 @@ function extractAlerts(text: string): string[] {
     .filter((l) => /⚠️\s*(ALERT|CRITICAL):/i.test(l) || /^CRITICAL:/i.test(l));
 }
 
-/** Render a single highlight item with markdown + LaTeX support */
-function HighlightItem({ text, onOpenReferenceUrl }: { text: string; onOpenReferenceUrl?: (url: string, title: string) => void }) {
-  const hasLatex = text.includes("$$");
+/** Convert inline [N] references to clickable elements */
+function InlineRefText({ text, citations, onOpenReferenceUrl, onOpenReferences }: {
+  text: string;
+  citations?: Citation[];
+  onOpenReferenceUrl?: (url: string, title: string) => void;
+  onOpenReferences?: () => void;
+}) {
+  // Split text on [N] patterns (e.g., [1], [2], [1][2][3])
+  const parts = text.split(/(\[\d+\])/g);
+  if (parts.length <= 1) return <>{text}</>;
+
+  return (
+    <>
+      {parts.map((part, i) => {
+        const match = part.match(/^\[(\d+)\]$/);
+        if (!match) return <React.Fragment key={i}>{part}</React.Fragment>;
+
+        const refIndex = parseInt(match[1], 10);
+        const citation = citations?.find((c) => c.index === refIndex);
+
+        return (
+          <button
+            key={i}
+            onClick={() => {
+              if (citation?.url && onOpenReferenceUrl) {
+                onOpenReferenceUrl(citation.url, citation.title);
+              } else if (onOpenReferences) {
+                onOpenReferences();
+              }
+            }}
+            className="inline-flex items-center justify-center min-w-[20px] h-[18px] px-1 mx-0.5 rounded text-[10px] font-bold bg-accent/15 text-accent hover:bg-accent/30 hover:text-white transition-all cursor-pointer border border-accent/20 align-middle leading-none"
+            title={citation ? `${citation.source} — ${citation.title}` : `Reference [${refIndex}]`}
+          >
+            {refIndex}
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
+/** Pre-process markdown text: replace [N] with placeholder links for markdown renderer */
+function preprocessInlineRefs(text: string): string {
+  // Replace [N] with markdown-compatible link: [⟨N⟩](#cite-N)
+  return text.replace(/\[(\d+)\]/g, "[`[$1]`](#cite-$1)");
+}
+
+/** Render a single highlight item with markdown + LaTeX support + inline refs */
+function HighlightItem({ text, onOpenReferenceUrl, citations, onOpenReferences }: { text: string; onOpenReferenceUrl?: (url: string, title: string) => void; citations?: Citation[]; onOpenReferences?: () => void }) {
+  const processed = preprocessInlineRefs(text);
+  const hasLatex = processed.includes("$");
+  const components = markdownComponents(onOpenReferenceUrl, citations, onOpenReferences);
+
   if (hasLatex) {
-    const parts = text.split(/(\$\$[\s\S]*?\$\$)/g);
+    const segments = splitLatex(processed);
     return (
       <div className="prose-content">
-        {parts.map((part, i) => {
-          if (part.startsWith("$$") && part.endsWith("$$")) {
-            return <LatexRenderer key={i} content={part} />;
+        {segments.map((seg, i) => {
+          if (seg.isLatex) {
+            return <LatexRenderer key={i} content={seg.content} />;
           }
           return (
-            <ReactMarkdown key={i} remarkPlugins={[remarkGfm]} components={markdownComponents(onOpenReferenceUrl)}>
-              {part}
+            <ReactMarkdown key={i} remarkPlugins={[remarkGfm]} components={components}>
+              {seg.content}
             </ReactMarkdown>
           );
         })}
@@ -165,15 +259,20 @@ function HighlightItem({ text, onOpenReferenceUrl }: { text: string; onOpenRefer
   }
   return (
     <div className="prose-content">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents(onOpenReferenceUrl)}>
-        {text}
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+        {processed}
       </ReactMarkdown>
     </div>
   );
 }
 
 /** Animated highlight component with markdown + LaTeX + clickable references */
-function HighlightedContent({ highlights, onOpenReferenceUrl }: { highlights: string[]; onOpenReferenceUrl?: (url: string, title: string) => void }) {
+function HighlightedContent({ highlights, onOpenReferenceUrl, citations, onOpenReferences }: {
+  highlights: string[];
+  onOpenReferenceUrl?: (url: string, title: string) => void;
+  citations?: Citation[];
+  onOpenReferences?: () => void;
+}) {
   const [visibleCount, setVisibleCount] = useState(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -215,7 +314,7 @@ function HighlightedContent({ highlights, onOpenReferenceUrl }: { highlights: st
             <div className={`flex gap-2.5 items-start ${isAlert ? "bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2" : ""}`}>
               <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 animate-pulse ${isAlert ? "bg-red-400" : "bg-amber-400"}`} />
               <div className="text-base text-gray-200 leading-relaxed flex-1">
-                <HighlightItem text={h} onOpenReferenceUrl={onOpenReferenceUrl} />
+                <HighlightItem text={h} onOpenReferenceUrl={onOpenReferenceUrl} citations={citations} onOpenReferences={onOpenReferences} />
               </div>
             </div>
           </div>
@@ -225,27 +324,50 @@ function HighlightedContent({ highlights, onOpenReferenceUrl }: { highlights: st
   );
 }
 
-/** Markdown renderer with proper styling */
-function MarkdownContent({ content, onOpenReferenceUrl }: { content: string; onOpenReferenceUrl?: (url: string, title: string) => void }) {
-  // Check if content has LaTeX
-  const hasLatex = content.includes("$$");
+/** Split text into alternating plain/LaTeX segments. Handles both $$ (display) and $ (inline) */
+function splitLatex(text: string): { content: string; isLatex: boolean; isDisplay: boolean }[] {
+  const segments: { content: string; isLatex: boolean; isDisplay: boolean }[] = [];
+  // Match display $$ first, then inline $
+  const regex = /(\$\$[\s\S]*?\$\$|\$[^$\n]+?\$)/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ content: text.slice(lastIndex, match.index), isLatex: false, isDisplay: false });
+    }
+    const isDisplay = match[0].startsWith("$$");
+    segments.push({ content: match[0], isLatex: true, isDisplay });
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    segments.push({ content: text.slice(lastIndex), isLatex: false, isDisplay: false });
+  }
+  return segments;
+}
+
+/** Markdown renderer with proper styling — includes inline [N] ref support */
+function MarkdownContent({ content, onOpenReferenceUrl, citations, onOpenReferences }: {
+  content: string;
+  onOpenReferenceUrl?: (url: string, title: string) => void;
+  citations?: Citation[];
+  onOpenReferences?: () => void;
+}) {
+  const processed = preprocessInlineRefs(content);
+  const hasLatex = processed.includes("$");
+  const components = markdownComponents(onOpenReferenceUrl, citations, onOpenReferences);
 
   if (hasLatex) {
-    // Split by LaTeX blocks and render each part
-    const parts = content.split(/(\$\$[\s\S]*?\$\$)/g);
+    const segments = splitLatex(processed);
     return (
       <div className="prose-content">
-        {parts.map((part, i) => {
-          if (part.startsWith("$$") && part.endsWith("$$")) {
-            return <LatexRenderer key={i} content={part} />;
+        {segments.map((seg, i) => {
+          if (seg.isLatex) {
+            return <LatexRenderer key={i} content={seg.content} />;
           }
           return (
-            <ReactMarkdown
-              key={i}
-              remarkPlugins={[remarkGfm]}
-              components={markdownComponents(onOpenReferenceUrl)}
-            >
-              {part}
+            <ReactMarkdown key={i} remarkPlugins={[remarkGfm]} components={components}>
+              {seg.content}
             </ReactMarkdown>
           );
         })}
@@ -255,17 +377,14 @@ function MarkdownContent({ content, onOpenReferenceUrl }: { content: string; onO
 
   return (
     <div className="prose-content">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={markdownComponents(onOpenReferenceUrl)}
-      >
-        {content}
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+        {processed}
       </ReactMarkdown>
     </div>
   );
 }
 
-function markdownComponents(onOpenReferenceUrl?: (url: string, title: string) => void) {
+function markdownComponents(onOpenReferenceUrl?: (url: string, title: string) => void, citations?: Citation[], onOpenReferences?: () => void) {
   return {
     h1: ({ children, ...props }: React.ComponentPropsWithoutRef<"h1">) => (
       <h1 className="text-xl font-bold text-gray-100 mt-4 mb-2" {...props}>{children}</h1>
@@ -297,22 +416,46 @@ function markdownComponents(onOpenReferenceUrl?: (url: string, title: string) =>
     li: ({ children, ...props }: React.ComponentPropsWithoutRef<"li">) => (
       <li className="text-base text-gray-200 leading-relaxed" {...props}>{children}</li>
     ),
-    a: ({ href, children, ...props }: React.ComponentPropsWithoutRef<"a">) => (
-      <button
-        className="text-accent hover:text-accent/80 underline underline-offset-2 font-medium"
-        onClick={(e) => {
-          e.preventDefault();
-          if (href && onOpenReferenceUrl) {
-            onOpenReferenceUrl(href, String(children) || href);
-          } else if (href) {
-            window.open(href, "_blank");
-          }
-        }}
-        {...(props as React.ComponentPropsWithoutRef<"button">)}
-      >
-        {children}
-      </button>
-    ),
+    a: ({ href, children, ...props }: React.ComponentPropsWithoutRef<"a">) => {
+      // Handle inline citation links (#cite-N)
+      const citeMatch = href?.match(/^#cite-(\d+)$/);
+      if (citeMatch) {
+        const refIndex = parseInt(citeMatch[1], 10);
+        const citation = citations?.find((c) => c.index === refIndex);
+        return (
+          <button
+            className="inline-flex items-center justify-center min-w-[20px] h-[18px] px-1 mx-0.5 rounded text-[10px] font-bold bg-accent/15 text-accent hover:bg-accent/30 hover:text-white transition-all cursor-pointer border border-accent/20 align-middle leading-none"
+            title={citation ? `${citation.source} — ${citation.title}` : `Reference [${refIndex}]`}
+            onClick={(e) => {
+              e.preventDefault();
+              if (citation?.url && onOpenReferenceUrl) {
+                onOpenReferenceUrl(citation.url, citation.title);
+              } else if (onOpenReferences) {
+                onOpenReferences();
+              }
+            }}
+          >
+            {refIndex}
+          </button>
+        );
+      }
+      return (
+        <button
+          className="text-accent hover:text-accent/80 underline underline-offset-2 font-medium"
+          onClick={(e) => {
+            e.preventDefault();
+            if (href && onOpenReferenceUrl) {
+              onOpenReferenceUrl(href, String(children) || href);
+            } else if (href) {
+              window.open(href, "_blank");
+            }
+          }}
+          {...(props as React.ComponentPropsWithoutRef<"button">)}
+        >
+          {children}
+        </button>
+      );
+    },
     code: ({ children, className, ...props }: React.ComponentPropsWithoutRef<"code"> & { className?: string }) => {
       const isBlock = className?.startsWith("language-");
       if (isBlock) {
@@ -491,8 +634,8 @@ export function MessageBubble({
                   <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
                 </svg>
                 <div className="text-sm text-red-200 leading-relaxed flex-1 prose-content">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents(onOpenReferenceUrl)}>
-                    {alert.replace(/^⚠️\s*ALERT:\s*/i, "").replace(/^⚠️\s*CRITICAL:\s*/i, "")}
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents(onOpenReferenceUrl, message.citations, onOpenReferences)}>
+                    {preprocessInlineRefs(alert.replace(/^⚠️\s*ALERT:\s*/i, "").replace(/^⚠️\s*CRITICAL:\s*/i, ""))}
                   </ReactMarkdown>
                 </div>
               </div>
@@ -503,9 +646,9 @@ export function MessageBubble({
         {/* Answer content */}
         <div className="px-5 pb-4">
           {mode === "highlight" && hasDualMode ? (
-            <HighlightedContent highlights={highlights} onOpenReferenceUrl={onOpenReferenceUrl} />
+            <HighlightedContent highlights={highlights} onOpenReferenceUrl={onOpenReferenceUrl} citations={message.citations} onOpenReferences={onOpenReferences} />
           ) : (
-            <MarkdownContent content={displayContent} onOpenReferenceUrl={onOpenReferenceUrl} />
+            <MarkdownContent content={displayContent} onOpenReferenceUrl={onOpenReferenceUrl} citations={message.citations} onOpenReferences={onOpenReferences} />
           )}
         </div>
 
@@ -545,14 +688,14 @@ export function MessageBubble({
                       variant={variant}
                       size="sm"
                       title={g.title}
+                      className="max-w-[220px]"
                       icon={
                         <span className="text-[9px] font-bold opacity-70">
                           {COUNTRY_LABELS[g.country] || g.country}
                         </span>
                       }
                     >
-                      {g.source}
-                      {g.year ? ` (${g.year})` : ""}
+                      <span className="truncate">{g.source}{g.year ? ` (${g.year})` : ""}</span>
                     </Badge>
                   </div>
                 );

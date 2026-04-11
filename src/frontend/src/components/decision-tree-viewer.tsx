@@ -77,11 +77,12 @@ export function DecisionTreeViewer({ title, nodes, edges, onClose }: DecisionTre
   const flowNodes = buildFlowNodes(nodes);
   const flowEdges = buildFlowEdges(edges);
 
-  // Resizable width
-  const [width, setWidth] = useState(420);
+  // Resizable width — default to ~1/3 of screen
+  const defaultWidth = typeof window !== "undefined" ? Math.round(window.innerWidth / 3) : 420;
+  const [width, setWidth] = useState(defaultWidth);
   const isDragging = useRef(false);
   const startX = useRef(0);
-  const startW = useRef(420);
+  const startW = useRef(defaultWidth);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     isDragging.current = true;
@@ -143,12 +144,19 @@ export function DecisionTreeViewer({ title, nodes, edges, onClose }: DecisionTre
         </div>
       </div>
 
-      {/* Drag handle on right edge */}
+      {/* Drag handle on right edge — visible grip dots */}
       <div
         onMouseDown={handleMouseDown}
-        className="w-1.5 h-full cursor-col-resize hover:bg-accent/30 active:bg-accent/50 transition-colors border-r border-border/30 shrink-0 flex items-center justify-center group"
+        className="w-3 h-full cursor-col-resize hover:bg-accent/20 active:bg-accent/40 transition-colors border-r border-border/40 shrink-0 flex items-center justify-center group"
+        style={{ touchAction: "none" }}
       >
-        <div className="w-0.5 h-8 rounded-full bg-gray-600 group-hover:bg-accent/70 transition-colors" />
+        <div className="flex flex-col items-center gap-1.5 opacity-60 group-hover:opacity-100 transition-opacity">
+          <div className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-accent" />
+          <div className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-accent" />
+          <div className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-accent" />
+          <div className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-accent" />
+          <div className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-accent" />
+        </div>
       </div>
     </div>
   );

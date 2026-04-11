@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any
 
 import httpx
@@ -31,7 +32,11 @@ class ExaClient:
         country_terms = " OR ".join(
             f'"{c} guidelines"' for c in countries
         )
-        full_query = f"latest clinical guidelines {query} ({country_terms})"
+        current_year = date.today().year
+        full_query = f"latest {current_year} clinical guidelines {query} ({country_terms})"
+
+        # Prefer content from last 2 years
+        start_date = (date.today() - timedelta(days=730)).isoformat()
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -42,6 +47,7 @@ class ExaClient:
             "numResults": num_results,
             "useAutoprompt": True,
             "type": "auto",
+            "startPublishedDate": start_date,
             "contents": {"text": {"maxCharacters": 2000}},
         }
 
