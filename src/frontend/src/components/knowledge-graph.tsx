@@ -19,8 +19,10 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
   const edges: Edge[] = [];
   let nodeId = 0;
 
+  // Patient data can be nested under data.patient or at root (depending on PHI masker output)
+  const patientInfo = (data.patient as Record<string, unknown>) || data;
   const patientNode = `n${nodeId++}`;
-  const name = (data.full_name as string) || (data.page_title as string) || "Patient";
+  const name = (patientInfo.full_name as string) || (patientInfo.page_title as string) || (data.full_name as string) || "Patient";
   nodes.push({
     id: patientNode,
     type: "input",
@@ -29,7 +31,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     style: { background: "#6366F1", color: "white", fontWeight: 700, borderRadius: 12, border: "none", padding: "8px 16px" },
   });
 
-  // Episodes
+  // Episodes (at root level in the scraper output)
   const episodes = (data.episodes as Record<string, unknown>[]) || [];
   const epY = 120;
   const epSpacing = 220;
@@ -63,8 +65,8 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     });
   });
 
-  // Allergies
-  const allergy = data.allergy as Record<string, unknown> | undefined;
+  // Allergies (nested under patient in scraper output)
+  const allergy = (patientInfo.allergy || data.allergy) as Record<string, unknown> | undefined;
   if (allergy && typeof allergy === "object") {
     const alId = `n${nodeId++}`;
     const allergyText = JSON.stringify(allergy).length > 5 ? "Allergy Data" : "No Allergies";

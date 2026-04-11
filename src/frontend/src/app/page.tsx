@@ -196,15 +196,19 @@ export default function Home() {
                 // Store patient data if available in the result
                 if (data.patient_context) {
                   setPatientData(data.patient_context);
+                  const pt = data.patient_context.patient || data.patient_context;
                   setPatientSummary(
+                    pt.full_name ||
+                    pt.page_title ||
                     data.patient_context.full_name ||
                     data.patient_context.page_title ||
                     "Patient data loaded"
                   );
                 }
 
+                const pendingId = pendingMsgIdRef.current;
                 const fullMsg: Message = {
-                  id: pendingMsgIdRef.current || crypto.randomUUID(),
+                  id: pendingId || crypto.randomUUID(),
                   role: "assistant",
                   content: data.fast_answer,
                   fast_answer: data.fast_answer,
@@ -226,11 +230,28 @@ export default function Home() {
                 };
 
                 setMessages((prev) => {
-                  if (pendingMsgIdRef.current) {
-                    return prev.map((m) =>
-                      m.id === pendingMsgIdRef.current ? fullMsg : m
-                    );
+                  // Strategy 1: Replace by pending ID
+                  if (pendingId) {
+                    const idx = prev.findIndex((m) => m.id === pendingId);
+                    if (idx >= 0) {
+                      const next = [...prev];
+                      next[idx] = fullMsg;
+                      return next;
+                    }
                   }
+                  // Strategy 2: Replace the last fast-only assistant message
+                  for (let i = prev.length - 1; i >= 0; i--) {
+                    if (
+                      prev[i].role === "assistant" &&
+                      prev[i].fast_answer &&
+                      !prev[i].complete_answer
+                    ) {
+                      const next = [...prev];
+                      next[i] = { ...fullMsg, id: prev[i].id };
+                      return next;
+                    }
+                  }
+                  // Strategy 3: Append as new message
                   return [...prev, fullMsg];
                 });
                 pendingMsgIdRef.current = null;

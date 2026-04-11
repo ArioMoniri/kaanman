@@ -26,8 +26,9 @@ _PATTERNS = {
 }
 
 # Protocol/patient IDs (7-9 digits) are NOT PHI — they are internal system IDs
-# used by the scraper. Do NOT mask them.
+# used by the scraper. Do NOT mask them. Also match spaced variants like "7021 4897".
 _PROTOCOL_RE = re.compile(r"\b\d{7,9}\b")
+_PROTOCOL_SPACED_RE = re.compile(r"\b\d{3,5}\s+\d{3,5}\b")
 
 
 class PhiMasker(BaseAgent):
@@ -48,7 +49,7 @@ PHI includes:
 - 11-digit Turkish national ID numbers → [TC_ID]
 
 DO NOT MASK:
-- 7-9 digit protocol/patient IDs (e.g., 30256609, 73524705) — these are internal system identifiers
+- 7-9 digit protocol/patient IDs (e.g., 30256609, 73524705, 7021 4897) — these are internal system identifiers, even when written with spaces between digit groups
 - Medical content: diagnoses, ICD codes, symptoms, medications, lab values
 - Department/specialty names
 - Medical terminology and clinical descriptions

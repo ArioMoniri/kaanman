@@ -40,7 +40,11 @@ async def ingest_cookies_json(cookies_json_str: str) -> dict[str, Any]:
 
 
 async def fetch_patient(patient_id: str, cookie_string: str) -> dict[str, Any]:
-    """Fetch a patient record from Cerebral Plus using the cookie string."""
+    """Fetch a patient record from Cerebral Plus using the cookie string.
+
+    Timeout is 600s (10 min) because patients with many episodes (60+)
+    can take several minutes to scrape all examination pages.
+    """
     fetch_script = SCRIPTS_DIR / "cerebral_fetch.py"
     if not fetch_script.exists():
         raise FileNotFoundError(f"Fetch script not found: {fetch_script}")
@@ -49,11 +53,14 @@ async def fetch_patient(patient_id: str, cookie_string: str) -> dict[str, Any]:
         [sys.executable, str(fetch_script), patient_id, "--stdout", "--cookie", cookie_string],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=600,
     )
     if proc.returncode != 0:
         stderr_lines = proc.stderr.strip().split("\n")
         raise RuntimeError(f"Patient fetch failed: {stderr_lines[-1] if stderr_lines else 'unknown error'}")
+
+    if not proc.stdout.strip():
+        raise RuntimeError("Patient fetch returned empty output — check stderr logs")
 
     return json.loads(proc.stdout)
 

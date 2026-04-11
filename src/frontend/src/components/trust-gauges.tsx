@@ -53,10 +53,12 @@ function RingGauge({
   score,
   label,
   reason,
+  colIndex,
 }: {
   score: number;
   label: string;
   reason: string;
+  colIndex: number;
 }) {
   const [hovered, setHovered] = useState(false);
   const color = getColor(score);
@@ -69,6 +71,14 @@ function RingGauge({
   const cx = 30;
   const cy = 30;
   const gradId = `ring-${label.replace(/\s/g, "")}`;
+
+  // Position tooltip based on column to prevent overflow
+  const tooltipAlign =
+    colIndex === 0
+      ? "left-0"
+      : colIndex === 2
+        ? "right-0"
+        : "left-1/2 -translate-x-1/2";
 
   return (
     <div
@@ -121,9 +131,9 @@ function RingGauge({
       </svg>
       <span className="text-[10px] text-gray-400 font-medium">{label}</span>
 
-      {/* Hover tooltip with reasoning */}
+      {/* Hover tooltip with reasoning — positioned by column to avoid overflow */}
       {hovered && reason && (
-        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 w-56 px-3 py-2 rounded-lg bg-[#1a1a2e] border border-border/50 shadow-xl">
+        <div className={`absolute bottom-full mb-2 z-50 w-56 px-3 py-2 rounded-lg bg-[#1a1a2e] border border-border/50 shadow-xl ${tooltipAlign}`}>
           <div className="flex items-center gap-1.5 mb-1">
             <span className="text-xs font-bold" style={{ color }}>
               {score}/100
@@ -162,12 +172,13 @@ export function TrustGauges({ scores, reasons, scorerConfidence }: TrustGaugesPr
 
       {/* Ring gauges grid */}
       <div className="grid grid-cols-3 gap-3">
-        {DIMENSIONS.map(({ key, label }) => (
+        {DIMENSIONS.map(({ key, label }, idx) => (
           <RingGauge
             key={key}
             score={scores[key]}
             label={label}
             reason={reasons[key] || ""}
+            colIndex={idx % 3}
           />
         ))}
       </div>

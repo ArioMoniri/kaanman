@@ -74,17 +74,17 @@ class OrchestratorResult:
         return {
             "fast_answer": self.fast_answer,
             "complete_answer": self.complete_answer,
-            "trust_scores": self.trust_scores,
-            "trust_reasons": self.trust_reasons,
+            "trust_scores": self.trust_scores.model_dump() if hasattr(self.trust_scores, "model_dump") else self.trust_scores,
+            "trust_reasons": self.trust_reasons.model_dump() if hasattr(self.trust_reasons, "model_dump") else self.trust_reasons,
             "scorer_confidence": self.scorer_confidence,
-            "guidelines_used": self.guidelines_used,
-            "citations": self.citations,
+            "guidelines_used": [g.model_dump() if hasattr(g, "model_dump") else g for g in self.guidelines_used],
+            "citations": [c.model_dump() if hasattr(c, "model_dump") else c for c in self.citations],
             "agents_used": self.agents_used,
             "agent_timings": [t.model_dump() for t in self.agent_timings],
             "total_time_ms": self.total_time_ms,
             "total_input_tokens": self.total_input_tokens,
             "total_output_tokens": self.total_output_tokens,
-            "decision_tree": self.decision_tree,
+            "decision_tree": self.decision_tree.model_dump() if self.decision_tree and hasattr(self.decision_tree, "model_dump") else self.decision_tree,
             "language": self.language,
             "priority_country": self.priority_country,
             "patient_context": self.patient_context,
@@ -188,12 +188,26 @@ class Orchestrator:
                     "agent": "patient_fetch", "status": "done",
                     "time_ms": t_fetch, "message": "Patient data loaded & PHI-masked",
                 })
-            except Exception as e:
+            except FileNotFoundError as e:
                 t_fetch = int((time.monotonic() - t0) * 1000)
                 await self._emit(on_status, {
                     "agent": "patient_fetch", "status": "error",
-                    "time_ms": t_fetch, "message": f"Patient fetch failed: {e}",
+                    "time_ms": t_fetch,
+                    "message": f"Patient fetch failed — missing file: {e}",
                 })
+            except Exception as e:
+                t_fetch = int((time.monotonic() - t0) * 1000)
+                import traceback
+                tb = traceback.format_exc()
+                await self._emit(on_status, {
+                    "agent": "patient_fetch", "status": "error",
+                    "time_ms": t_fetch,
+                    "message": f"Patient fetch failed: {type(e).__name__}: {e}",
+                })
+                import logging
+                logging.getLogger("cerebralink.orchestrator").error(
+                    "Patient fetch error for protocol %s:\n%s", route.detected_protocol_id, tb
+                )
 
         # ── 3. Fan-out: parallel agents ──
         agent_map: dict[str, tuple] = {}

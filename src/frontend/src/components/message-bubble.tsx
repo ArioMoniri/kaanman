@@ -364,7 +364,7 @@ export function MessageBubble({
 
   return (
     <div className="flex flex-col gap-0 max-w-full">
-      <div className="rounded-2xl rounded-bl-md bg-surface-light border border-border/30 overflow-hidden">
+      <div className="rounded-2xl rounded-bl-md bg-surface-light border border-border/30">
         {/* Country / Language header */}
         {countryFlag && priorityCountry && (
           <div className="flex items-center gap-1.5 px-5 pt-3 text-xs text-gray-400">

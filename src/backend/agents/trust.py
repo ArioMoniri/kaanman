@@ -55,6 +55,15 @@ Dimensions:
    - 50-69: Older guidelines but still valid
    - <50: Outdated or no sources cited
 
+CRITICAL — NON-ANSWER DETECTION:
+If the response essentially says it cannot access patient data, cannot find relevant information, provides only generic disclaimers, or does NOT actually answer the clinical question asked, ALL dimension scores MUST be LOW (0-25). A well-written non-answer is still a non-answer. Score the USEFULNESS of the response to the doctor, not its linguistic quality.
+
+Indicators of a non-answer:
+- "I cannot access", "data unavailable", "unable to retrieve"
+- Generic safety disclaimers without specific clinical guidance
+- Repeating the question without providing a real answer
+- Suggesting to "consult a physician" without any clinical analysis
+
 Also assess your own confidence in this evaluation (0-100). Consider: did the answer contain enough detail for you to evaluate properly? Could you verify the claims?
 
 RESPOND WITH ONLY JSON:

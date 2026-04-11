@@ -14,6 +14,8 @@ from src.backend.agents.base import BaseAgent
 from src.backend.core.config import settings
 
 _PROTOCOL_RE = re.compile(r"\b(\d{7,9})\b")
+# Match protocol numbers with spaces like "7021 4897" → "70214897"
+_PROTOCOL_SPACED_RE = re.compile(r"\b(\d{3,5})\s+(\d{3,5})\b")
 
 
 @dataclass
@@ -104,6 +106,13 @@ Set needs_decision_tree=true when the query involves:
         # Pre-extract protocol ID before sending to LLM
         protocol_match = _PROTOCOL_RE.search(message)
         detected_protocol = protocol_match.group(1) if protocol_match else ""
+        # Also match protocol numbers with spaces (e.g., "7021 4897" → "70214897")
+        if not detected_protocol:
+            spaced_match = _PROTOCOL_SPACED_RE.search(message)
+            if spaced_match:
+                joined = spaced_match.group(1) + spaced_match.group(2)
+                if 7 <= len(joined) <= 9:
+                    detected_protocol = joined
 
         ctx_hint = ""
         if patient_context:
