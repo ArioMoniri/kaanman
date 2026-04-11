@@ -46,7 +46,9 @@ async def chat(req: ChatRequest):
         "trust_scores": result.trust_scores.model_dump(),
     })
 
-    return ChatResponse(session_id=session_id, **result.model_dump())
+    result_data = result.model_dump()
+    result_data["patient_context"] = patient_ctx
+    return ChatResponse(session_id=session_id, **result_data)
 
 
 @router.post("/api/chat/stream")
@@ -78,7 +80,9 @@ async def chat_stream(req: ChatRequest):
                 "complete_answer": result.complete_answer,
                 "trust_scores": result.trust_scores.model_dump(),
             })
-            resp = ChatResponse(session_id=session_id, **result.model_dump())
+            result_data = result.model_dump()
+            result_data["patient_context"] = patient_ctx
+            resp = ChatResponse(session_id=session_id, **result_data)
             await status_queue.put({"_type": "result", "data": resp.model_dump()})
         except Exception as e:
             await status_queue.put({"_type": "error", "message": str(e)})

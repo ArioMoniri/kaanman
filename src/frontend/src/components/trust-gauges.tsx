@@ -26,13 +26,13 @@ interface TrustGaugesProps {
   scorerConfidence: number;
 }
 
-const DIMENSIONS: { key: keyof TrustScores; label: string; icon: string }[] = [
-  { key: "evidence_quality", label: "Evidence", icon: "E" },
-  { key: "guideline_alignment", label: "Guidelines", icon: "G" },
-  { key: "clinical_relevance", label: "Relevance", icon: "R" },
-  { key: "safety_check", label: "Safety", icon: "S" },
-  { key: "completeness", label: "Complete", icon: "C" },
-  { key: "source_recency", label: "Recency", icon: "T" },
+const DIMENSIONS: { key: keyof TrustScores; label: string }[] = [
+  { key: "evidence_quality", label: "Evidence" },
+  { key: "guideline_alignment", label: "Guidelines" },
+  { key: "clinical_relevance", label: "Relevance" },
+  { key: "safety_check", label: "Safety" },
+  { key: "completeness", label: "Complete" },
+  { key: "source_recency", label: "Recency" },
 ];
 
 function getColor(score: number): string {
@@ -42,7 +42,14 @@ function getColor(score: number): string {
   return "#EF4444";
 }
 
-function SpeedometerGauge({
+function getGradient(score: number): [string, string] {
+  if (score >= 80) return ["#22C55E", "#16A34A"];
+  if (score >= 60) return ["#EAB308", "#CA8A04"];
+  if (score >= 40) return ["#F97316", "#EA580C"];
+  return ["#EF4444", "#DC2626"];
+}
+
+function RingGauge({
   score,
   label,
   reason,
@@ -53,97 +60,72 @@ function SpeedometerGauge({
 }) {
   const [hovered, setHovered] = useState(false);
   const color = getColor(score);
-  // Arc from -135deg to +135deg (270 degrees total)
-  const radius = 28;
-  const circumference = (270 / 360) * 2 * Math.PI * radius;
+  const [gradStart, gradEnd] = getGradient(score);
+
+  const radius = 24;
+  const strokeWidth = 4;
+  const circumference = 2 * Math.PI * radius;
   const filled = (score / 100) * circumference;
-
-  // Arc path (SVG arc from -135 to +135)
-  const startAngle = -225;
-  const endAngle = startAngle + 270;
-  const needleAngle = startAngle + (score / 100) * 270;
-
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const cx = 36;
-  const cy = 36;
-
-  const arcStart = {
-    x: cx + radius * Math.cos(toRad(startAngle)),
-    y: cy + radius * Math.sin(toRad(startAngle)),
-  };
-  const arcEnd = {
-    x: cx + radius * Math.cos(toRad(endAngle)),
-    y: cy + radius * Math.sin(toRad(endAngle)),
-  };
-  const arcFilled = {
-    x: cx + radius * Math.cos(toRad(needleAngle)),
-    y: cy + radius * Math.sin(toRad(needleAngle)),
-  };
-
-  const largeArcBg = 1;
-  const largeArcFill = score > 50 ? 1 : 0;
-
-  const needleTip = {
-    x: cx + (radius - 6) * Math.cos(toRad(needleAngle)),
-    y: cy + (radius - 6) * Math.sin(toRad(needleAngle)),
-  };
+  const cx = 30;
+  const cy = 30;
+  const gradId = `ring-${label.replace(/\s/g, "")}`;
 
   return (
     <div
-      className="relative flex flex-col items-center"
+      className="relative flex flex-col items-center gap-1"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <svg width="72" height="52" viewBox="0 0 72 52">
-        {/* Background arc */}
-        <path
-          d={`M ${arcStart.x} ${arcStart.y} A ${radius} ${radius} 0 ${largeArcBg} 1 ${arcEnd.x} ${arcEnd.y}`}
+      <svg width="60" height="60" viewBox="0 0 60 60">
+        <defs>
+          <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor={gradStart} />
+            <stop offset="100%" stopColor={gradEnd} />
+          </linearGradient>
+        </defs>
+        {/* Background ring */}
+        <circle
+          cx={cx}
+          cy={cy}
+          r={radius}
           fill="none"
-          stroke="#333"
-          strokeWidth="5"
-          strokeLinecap="round"
+          stroke="#2A2A2E"
+          strokeWidth={strokeWidth}
         />
-        {/* Filled arc */}
-        {score > 0 && (
-          <path
-            d={`M ${arcStart.x} ${arcStart.y} A ${radius} ${radius} 0 ${largeArcFill} 1 ${arcFilled.x} ${arcFilled.y}`}
-            fill="none"
-            stroke={color}
-            strokeWidth="5"
-            strokeLinecap="round"
-          />
-        )}
-        {/* Needle */}
-        <line
-          x1={cx}
-          y1={cy}
-          x2={needleTip.x}
-          y2={needleTip.y}
-          stroke={color}
-          strokeWidth="1.5"
+        {/* Filled ring */}
+        <circle
+          cx={cx}
+          cy={cy}
+          r={radius}
+          fill="none"
+          stroke={`url(#${gradId})`}
+          strokeWidth={strokeWidth}
           strokeLinecap="round"
+          strokeDasharray={`${filled} ${circumference - filled}`}
+          strokeDashoffset={circumference * 0.25}
+          style={{ transition: "stroke-dasharray 0.8s ease" }}
         />
-        <circle cx={cx} cy={cy} r="2.5" fill={color} />
         {/* Score text */}
         <text
           x={cx}
-          y={cy + 14}
+          y={cy + 1}
           textAnchor="middle"
+          dominantBaseline="middle"
           fill={color}
-          fontSize="11"
+          fontSize="13"
           fontWeight="700"
           fontFamily="var(--font-manrope)"
         >
           {score}
         </text>
       </svg>
-      <span className="text-[10px] text-gray-400 -mt-1">{label}</span>
+      <span className="text-[10px] text-gray-400 font-medium">{label}</span>
 
       {/* Hover tooltip with reasoning */}
       {hovered && reason && (
-        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 w-56 px-3 py-2 rounded-lg bg-surface border border-border/50 shadow-xl">
+        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 w-56 px-3 py-2 rounded-lg bg-[#1a1a2e] border border-border/50 shadow-xl">
           <div className="flex items-center gap-1.5 mb-1">
-            <span className="text-xs font-semibold" style={{ color }}>
+            <span className="text-xs font-bold" style={{ color }}>
               {score}/100
             </span>
             <span className="text-[10px] text-gray-400">{label}</span>
@@ -162,26 +144,26 @@ export function TrustGauges({ scores, reasons, scorerConfidence }: TrustGaugesPr
   const overallColor = getColor(overall);
 
   return (
-    <div className="p-3 rounded-xl bg-surface border border-border/20">
-      {/* Overall score */}
-      <div className="flex items-center justify-between mb-2">
+    <div className="flex-1 min-w-[240px]">
+      {/* Overall score header */}
+      <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <span className="text-xl font-bold" style={{ color: overallColor }}>
+          <span className="text-2xl font-bold" style={{ color: overallColor }}>
             {overall}
           </span>
-          <span className="text-[10px] text-gray-500 uppercase tracking-wider">
+          <span className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">
             Trust Score
           </span>
         </div>
-        <span className="text-[9px] text-gray-600">
+        <span className="text-[10px] text-gray-600 font-medium">
           Confidence: {scorerConfidence}%
         </span>
       </div>
 
-      {/* Individual gauges */}
-      <div className="grid grid-cols-3 gap-2">
+      {/* Ring gauges grid */}
+      <div className="grid grid-cols-3 gap-3">
         {DIMENSIONS.map(({ key, label }) => (
-          <SpeedometerGauge
+          <RingGauge
             key={key}
             score={scores[key]}
             label={label}

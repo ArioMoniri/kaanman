@@ -105,8 +105,8 @@ SOURCES USED: {list(agent_outputs.keys())}"""
                     scores[k] = max(0, min(100, int(val)))
                     reasons[k] = ""
                 else:
-                    scores[k] = 50
-                    reasons[k] = ""
+                    scores[k] = 0
+                    reasons[k] = "Dimension not evaluated"
 
             scorer_confidence = max(0, min(100, int(raw.get("scorer_confidence", 70))))
 
@@ -115,13 +115,14 @@ SOURCES USED: {list(agent_outputs.keys())}"""
                 "reasons": reasons,
                 "scorer_confidence": scorer_confidence,
             }
-        except Exception:
-            default_scores = {k: 50 for k in (
+        except Exception as e:
+            default_scores = {k: 0 for k in (
                 "evidence_quality", "guideline_alignment", "clinical_relevance",
                 "safety_check", "completeness", "source_recency",
             )}
+            error_msg = str(e) if str(e) else "Unknown scoring error"
             return {
                 "scores": default_scores,
-                "reasons": {k: "Scoring failed — using defaults" for k in default_scores},
+                "reasons": {k: f"Scorer failed: {error_msg}" for k in default_scores},
                 "scorer_confidence": 0,
             }

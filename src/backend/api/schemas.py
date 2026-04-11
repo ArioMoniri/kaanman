@@ -91,6 +91,7 @@ class ChatResponse(BaseModel):
     decision_tree: DecisionTree | None = None
     language: str = "en"
     priority_country: str = ""
+    patient_context: dict | None = None
 
 
 class PatientIngestRequest(BaseModel):

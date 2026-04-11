@@ -32,12 +32,14 @@ TooltipContent.displayName = "TooltipContent";
 /* ---------- ChatInput ---------- */
 interface ChatInputProps {
   onSend: (message: string) => void;
+  onCancel?: () => void;
   isLoading?: boolean;
   placeholder?: string;
 }
 
 export function ChatInput({
   onSend,
+  onCancel,
   isLoading = false,
   placeholder = "Ask a clinical question...",
 }: ChatInputProps) {
@@ -101,28 +103,30 @@ export function ChatInput({
           <Tooltip>
             <TooltipTrigger asChild>
               <motion.button
-                onClick={handleSubmit}
-                disabled={isLoading || !hasContent}
-                whileHover={hasContent ? { scale: 1.05 } : {}}
-                whileTap={hasContent ? { scale: 0.95 } : {}}
+                onClick={isLoading && onCancel ? onCancel : handleSubmit}
+                disabled={!isLoading && !hasContent}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
                 className={cn(
                   "h-8 w-8 rounded-full inline-flex items-center justify-center",
                   "transition-all duration-200 focus-visible:outline-none",
                   "disabled:pointer-events-none disabled:opacity-50",
-                  hasContent && !isLoading
-                    ? "bg-white hover:bg-white/80 text-[#1F2023]"
-                    : "bg-transparent text-[#9CA3AF]"
+                  isLoading
+                    ? "bg-red-500 hover:bg-red-400 text-white"
+                    : hasContent
+                      ? "bg-white hover:bg-white/80 text-[#1F2023]"
+                      : "bg-transparent text-[#9CA3AF]"
                 )}
               >
                 {isLoading ? (
-                  <Square className="h-4 w-4 fill-current animate-pulse" />
+                  <Square className="h-3.5 w-3.5 fill-current" />
                 ) : (
                   <ArrowUp className="h-4 w-4" />
                 )}
               </motion.button>
             </TooltipTrigger>
             <TooltipContent side="top">
-              {isLoading ? "Stop generation" : hasContent ? "Send message" : "Type a message"}
+              {isLoading ? "Cancel" : hasContent ? "Send message" : "Type a message"}
             </TooltipContent>
           </Tooltip>
         </div>

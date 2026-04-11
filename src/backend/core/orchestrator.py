@@ -52,12 +52,12 @@ class OrchestratorResult:
         self.fast_answer: str = ""
         self.complete_answer: str = ""
         self.trust_scores = TrustScores(
-            evidence_quality=50, guideline_alignment=50,
-            clinical_relevance=50, safety_check=50,
-            completeness=50, source_recency=50,
+            evidence_quality=0, guideline_alignment=0,
+            clinical_relevance=0, safety_check=0,
+            completeness=0, source_recency=0,
         )
         self.trust_reasons = TrustReasons()
-        self.scorer_confidence: int = 70
+        self.scorer_confidence: int = 0
         self.guidelines_used: list[GuidelineRef] = []
         self.citations: list[Citation] = []
         self.agents_used: list[str] = []

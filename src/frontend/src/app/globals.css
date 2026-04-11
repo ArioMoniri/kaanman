@@ -55,6 +55,19 @@ textarea {
   border-color: #8B5CF6 !important;
 }
 
+/* Prose content styles for markdown */
+.prose-content {
+  font-size: 15px;
+  line-height: 1.7;
+  color: #E5E7EB;
+}
+.prose-content > *:first-child {
+  margin-top: 0;
+}
+.prose-content > *:last-child {
+  margin-bottom: 0;
+}
+
 /* React Flow dark theme */
 .react-flow__node {
   font-family: var(--font-manrope), sans-serif;

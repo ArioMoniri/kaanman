@@ -51,7 +51,7 @@ export function RadarChart({ scores }: { scores: TrustScores }) {
   const color = getScoreColor(overall);
 
   return (
-    <div className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-border/20">
+    <div className="flex items-center gap-3">
       <div className="w-[180px] h-[140px]">
         <ResponsiveContainer width="100%" height="100%">
           <RechartsRadar data={data} cx="50%" cy="50%" outerRadius="70%">

@@ -45,6 +45,9 @@ export default function Home() {
   const [refUrl, setRefUrl] = useState<string | undefined>(undefined);
   const [refTitle, setRefTitle] = useState<string | undefined>(undefined);
 
+  // Abort controller for cancelling requests
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   const handleOpenReferenceUrl = useCallback((url: string, title: string) => {
     setRefUrl(url);
     setRefTitle(title);
@@ -82,6 +85,15 @@ export default function Home() {
     }
   }, []);
 
+  const handleCancel = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsLoading(false);
+    stopTimer();
+  }, [stopTimer]);
+
   const handleSend = async (text: string) => {
     if (!text.trim() || isLoading) return;
 
@@ -99,11 +111,15 @@ export default function Home() {
     pendingMsgIdRef.current = null;
     startTimer();
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
       const resp = await fetch(`${API_URL}/api/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text, session_id: sessionId }),
+        signal: controller.signal,
       });
 
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -157,6 +173,11 @@ export default function Home() {
                     output: prev.output + (data.tokens.output_tokens || 0),
                   }));
                 }
+
+                // If patient_fetch succeeded, store patient data
+                if (data.agent === "patient_fetch" && data.status === "done") {
+                  // Patient data will come in the result event
+                }
               } else if (eventType === "fast_answer") {
                 const msgId = crypto.randomUUID();
                 pendingMsgIdRef.current = msgId;
@@ -172,6 +193,16 @@ export default function Home() {
                 setMessages((prev) => [...prev, fastMsg]);
               } else if (eventType === "result") {
                 if (!sessionId) setSessionId(data.session_id);
+
+                // Store patient data if available in the result
+                if (data.patient_context) {
+                  setPatientData(data.patient_context);
+                  setPatientSummary(
+                    data.patient_context.full_name ||
+                    data.patient_context.page_title ||
+                    "Patient data loaded"
+                  );
+                }
 
                 const fullMsg: Message = {
                   id: pendingMsgIdRef.current || crypto.randomUUID(),
@@ -220,20 +251,26 @@ export default function Home() {
         }
       }
     } catch (err) {
-      const errorMsg: Message = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: `Connection error: ${err instanceof Error ? err.message : "Unknown error"}. Make sure the backend is running on ${API_URL}.`,
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, errorMsg]);
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // User cancelled — do nothing
+      } else {
+        const errorMsg: Message = {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: `Connection error: ${err instanceof Error ? err.message : "Unknown error"}. Make sure the backend is running on ${API_URL}.`,
+          timestamp: Date.now(),
+        };
+        setMessages((prev) => [...prev, errorMsg]);
+      }
     } finally {
       setIsLoading(false);
       stopTimer();
+      abortControllerRef.current = null;
     }
   };
 
   const handleNewChat = async () => {
+    handleCancel();
     if (sessionId) {
       await fetch(`${API_URL}/api/patient/clear?session_id=${sessionId}`, {
         method: "POST",
@@ -249,16 +286,32 @@ export default function Home() {
     setShowKnowledgeGraph(false);
   };
 
+  // Check for patient data on session
+  useEffect(() => {
+    if (!sessionId) return;
+    fetch(`${API_URL}/api/session/${sessionId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.patient_summary) {
+          setPatientSummary(data.patient_summary);
+        }
+      })
+      .catch(() => {});
+  }, [sessionId]);
+
   return (
     <div className="flex h-screen">
-      {/* Main chat area */}
-      <div className={`flex flex-col flex-1 min-w-0 transition-all ${showReferences ? "mr-0" : ""}`}>
+      {/* Left sidebar spacer */}
+      <div className="hidden lg:block lg:w-[15%] xl:w-[20%] shrink-0" />
+
+      {/* Main chat area — centered, max 720px */}
+      <div className={`flex flex-col flex-1 min-w-0 max-w-[720px] mx-auto transition-all ${showReferences ? "mr-0" : ""}`}>
         {/* Header */}
         <header className="flex items-center justify-between px-6 py-4 border-b border-border/30">
           <div className="flex items-center gap-3">
             <CerebraLinkLogo size={38} />
             <div>
-              <h1 className="text-lg font-semibold text-gray-100">CerebraLink</h1>
+              <h1 className="text-lg font-bold text-gray-100">CerebraLink</h1>
               <p className="text-xs text-gray-500">Medical AI Assistant</p>
             </div>
           </div>
@@ -285,13 +338,13 @@ export default function Home() {
         {patientSummary && <PatientBanner summary={patientSummary} />}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-center">
               <div className="mb-4">
                 <CerebraLinkLogo size={80} />
               </div>
-              <h2 className="text-xl font-semibold text-gray-200 mb-2">
+              <h2 className="text-xl font-bold text-gray-200 mb-2">
                 CerebraLink
               </h2>
               <p className="text-gray-500 max-w-md text-sm leading-relaxed">
@@ -332,10 +385,13 @@ export default function Home() {
         </div>
 
         {/* Chat Input */}
-        <div className="px-6 pb-6 pt-2">
-          <ChatInput onSend={handleSend} isLoading={isLoading} />
+        <div className="px-4 pb-6 pt-2">
+          <ChatInput onSend={handleSend} isLoading={isLoading} onCancel={handleCancel} />
         </div>
       </div>
+
+      {/* Right sidebar spacer (collapses when references open) */}
+      {!showReferences && <div className="hidden lg:block lg:w-[15%] xl:w-[20%] shrink-0" />}
 
       {/* Reference Sidebar (right) */}
       {showReferences && latestRefMsg && (
