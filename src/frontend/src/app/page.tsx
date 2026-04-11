@@ -409,16 +409,21 @@ export default function Home() {
 
   const handleOpenPacsEntry = useCallback(
     (entry: ManifestEntry) => {
-      // Open report viewer with PACS info — the viewer has PACS link handling built-in
-      setSelectedReport({
-        file: entry.file,
-        textFile: entry.text_file,
-        title: entry.report_name || entry.file,
-        reportId: entry.report_id,
-        accessionNumber: entry.accession_number,
-      });
+      if (entry.accession_number || entry.pacs_url) {
+        // Open report viewer with PACS info — the viewer has PACS link handling built-in
+        setSelectedReport({
+          file: entry.file,
+          textFile: entry.text_file,
+          title: entry.report_name || entry.file,
+          reportId: entry.report_id,
+          accessionNumber: entry.accession_number,
+        });
+      } else if (pacsAllStudies) {
+        // No accession number — open the PACS all-studies viewer directly
+        window.open(pacsAllStudies, "_blank", "noopener,noreferrer");
+      }
     },
-    [],
+    [pacsAllStudies],
   );
 
   const handleOpenReportType = useCallback((reportType: string) => {
@@ -884,23 +889,29 @@ export default function Home() {
       {/* Main chat area — always centered */}
       <div className="flex flex-col mx-auto w-full max-w-[720px] min-w-0">
         {/* Header */}
-        <header className="flex items-center justify-between px-6 py-4 border-b border-border/30">
-          <div className="flex items-center gap-3">
-            <CerebraLinkLogo size={38} />
-            <div>
-              <h1 className="text-xl font-bold text-gray-100">CerebraLink</h1>
-              <p className="text-sm text-gray-500">Medical AI Assistant</p>
+        <header className="flex items-center gap-2 px-4 py-2.5 border-b border-border/30">
+          {/* Logo + title — compact */}
+          <div className="flex items-center gap-2 shrink-0">
+            <CerebraLinkLogo size={30} />
+            <div className="leading-tight">
+              <h1 className="text-sm font-bold text-gray-100">CerebraLink</h1>
+              <p className="text-[10px] text-gray-500">Medical AI Assistant</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+
+          {/* Spacer */}
+          <div className="flex-1 min-w-0" />
+
+          {/* Navigation buttons — uniform compact style */}
+          <div className="flex items-center gap-1.5">
             <ReferenceLegend />
             {patientData && (
               <button
                 onClick={() => handleOpenTrend("")}
-                className="text-xs text-sky-400/80 hover:text-sky-400 transition-colors px-3 py-1.5 rounded-lg border border-sky-500/30 hover:border-sky-500/50 flex items-center gap-1"
+                className="text-[11px] text-sky-400/80 hover:text-sky-400 transition-colors px-2 py-1 rounded-md border border-sky-500/25 hover:border-sky-500/50 flex items-center gap-1 hover:bg-sky-500/5"
                 title="Open lab results trend monitor"
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
                 </svg>
                 Lab Trends
@@ -910,17 +921,20 @@ export default function Home() {
             {patientData && (
               <button
                 onClick={() => setShowKnowledgeGraph(true)}
-                className="text-xs text-emerald-400/80 hover:text-emerald-400 transition-colors px-3 py-1.5 rounded-lg border border-emerald-500/30 hover:border-emerald-500/50"
+                className="text-[11px] text-emerald-400/80 hover:text-emerald-400 transition-colors px-2 py-1 rounded-md border border-emerald-500/25 hover:border-emerald-500/50 flex items-center gap-1 hover:bg-emerald-500/5"
               >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3" /><line x1="12" y1="1" x2="12" y2="5" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="4.22" y1="4.22" x2="7.05" y2="7.05" /><line x1="16.95" y1="16.95" x2="19.78" y2="19.78" /><line x1="1" y1="12" x2="5" y2="12" /><line x1="19" y1="12" x2="23" y2="12" />
+                </svg>
                 Knowledge Graph
               </button>
             )}
             <button
               onClick={() => setShowHistory(true)}
-              className="text-xs text-indigo-400/80 hover:text-indigo-400 transition-colors px-3 py-1.5 rounded-lg border border-indigo-500/30 hover:border-indigo-500/50"
+              className="text-[11px] text-indigo-400/80 hover:text-indigo-400 transition-colors px-2 py-1 rounded-md border border-indigo-500/25 hover:border-indigo-500/50 flex items-center gap-1 hover:bg-indigo-500/5"
               title="Patient History"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="inline mr-1 -mt-0.5">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" />
                 <polyline points="12 6 12 12 16 14" />
               </svg>
@@ -928,9 +942,12 @@ export default function Home() {
             </button>
             <button
               onClick={handleNewChat}
-              className="text-xs text-gray-400 hover:text-gray-200 transition-colors px-3 py-1.5 rounded-lg border border-border/50 hover:border-border bg-surface hover:bg-surface-light"
+              className="text-[11px] text-gray-400 hover:text-gray-200 transition-colors px-2 py-1 rounded-md border border-border/40 hover:border-border bg-surface/50 hover:bg-surface-light flex items-center gap-1"
             >
-              + New Chat
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              New Chat
             </button>
           </div>
         </header>

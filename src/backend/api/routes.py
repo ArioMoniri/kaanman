@@ -383,7 +383,13 @@ async def serve_report_file(protocol_id: str, filename: str):
     media_type = media_types.get(suffix, "application/octet-stream")
 
     # Use Content-Disposition: inline so PDFs render in iframes instead of downloading
-    headers = {"Content-Disposition": f'inline; filename="{filename}"'}
+    # RFC 5987: encode non-ASCII filenames with filename* to avoid UnicodeEncodeError
+    from urllib.parse import quote
+    ascii_name = filename.encode("ascii", "replace").decode("ascii")
+    utf8_name = quote(filename, safe="")
+    headers = {
+        "Content-Disposition": f"inline; filename=\"{ascii_name}\"; filename*=UTF-8''{utf8_name}"
+    }
     return FileResponse(
         path=str(file_path),
         media_type=media_type,

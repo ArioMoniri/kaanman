@@ -225,6 +225,21 @@ function ReportNode({ data }: { data: GraphNodeData }) {
                     <span>PACS</span>
                     <span style={{ fontSize: 7, opacity: 0.7 }}>{e.accession_number}</span>
                   </button>
+                ) : e.pacs_url || /radyoloji/i.test(e.report_type || "") ? (
+                  <button
+                    onClick={(ev) => { ev.stopPropagation(); if (data.onOpenPacs) data.onOpenPacs(e); }}
+                    style={{
+                      fontSize: 8, color: "#60a5fa", fontWeight: 600,
+                      background: "rgba(96,165,250,0.1)", border: "1px solid rgba(96,165,250,0.2)",
+                      padding: "2px 8px", borderRadius: 4, cursor: "pointer",
+                      transition: "all 0.15s", display: "flex", alignItems: "center", gap: 3,
+                    }}
+                    onMouseEnter={(ev) => { (ev.currentTarget as HTMLButtonElement).style.background = "rgba(96,165,250,0.25)"; }}
+                    onMouseLeave={(ev) => { (ev.currentTarget as HTMLButtonElement).style.background = "rgba(96,165,250,0.1)"; }}
+                    title="View in PACS Viewer"
+                  >
+                    <span>PACS ↗</span>
+                  </button>
                 ) : (
                   <button
                     onClick={(ev) => { ev.stopPropagation(); if (data.onOpenReport) data.onOpenReport(e); }}
@@ -403,7 +418,7 @@ function PacsPanel({ entries, pacsAllStudies, onOpenPacs, allRadiologyEntries }:
           PACS Radiology
         </span>
         <span style={{ fontSize: 9, color: "#93c5fd", background: "rgba(96,165,250,0.15)", padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>
-          {totalPacs} linked{totalRadiology > totalPacs ? ` · ${totalRadiology} total` : ""}
+          {totalRadiology || totalPacs} studies{totalPacs > 0 ? ` · ${totalPacs} linked` : ""}
         </span>
         <span style={{ fontSize: 9, color: "#6b7280", marginLeft: "auto" }}>
           {expanded ? "▲" : "▼"}
@@ -454,24 +469,20 @@ function PacsPanel({ entries, pacsAllStudies, onOpenPacs, allRadiologyEntries }:
                     {e.accession_number && <span style={{ color: "#60a5fa", marginLeft: 4 }}>Acc: {e.accession_number}</span>}
                   </div>
                 </div>
-                {e.accession_number ? (
-                  <button
-                    onClick={(ev) => { ev.stopPropagation(); if (onOpenPacs) onOpenPacs(e); }}
-                    style={{
-                      fontSize: 9, color: "#60a5fa", fontWeight: 600,
-                      background: "rgba(96,165,250,0.1)", border: "1px solid rgba(96,165,250,0.25)",
-                      padding: "3px 10px", borderRadius: 6, cursor: "pointer",
-                      transition: "all 0.15s", flexShrink: 0,
-                    }}
-                    onMouseEnter={(ev) => { (ev.currentTarget as HTMLButtonElement).style.background = "rgba(96,165,250,0.25)"; }}
-                    onMouseLeave={(ev) => { (ev.currentTarget as HTMLButtonElement).style.background = "rgba(96,165,250,0.1)"; }}
-                    title={`Open PACS (Acc: ${e.accession_number})`}
-                  >
-                    PACS ↗
-                  </button>
-                ) : (
-                  <span style={{ fontSize: 8, color: "#4b5563", fontWeight: 500, flexShrink: 0 }}>No link</span>
-                )}
+                <button
+                  onClick={(ev) => { ev.stopPropagation(); if (onOpenPacs) onOpenPacs(e); }}
+                  style={{
+                    fontSize: 9, color: "#60a5fa", fontWeight: 600,
+                    background: "rgba(96,165,250,0.1)", border: "1px solid rgba(96,165,250,0.25)",
+                    padding: "3px 10px", borderRadius: 6, cursor: "pointer",
+                    transition: "all 0.15s", flexShrink: 0,
+                  }}
+                  onMouseEnter={(ev) => { (ev.currentTarget as HTMLButtonElement).style.background = "rgba(96,165,250,0.25)"; }}
+                  onMouseLeave={(ev) => { (ev.currentTarget as HTMLButtonElement).style.background = "rgba(96,165,250,0.1)"; }}
+                  title={e.accession_number ? `Open PACS (Acc: ${e.accession_number})` : "View in PACS Viewer"}
+                >
+                  PACS ↗
+                </button>
               </div>
             </div>
           ))}
