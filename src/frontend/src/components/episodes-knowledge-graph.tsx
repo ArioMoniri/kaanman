@@ -13,6 +13,8 @@ import {
   applyNodeChanges,
   Handle,
   Position,
+  useReactFlow,
+  ReactFlowProvider,
 } from "@xyflow/react";
 
 /* ------------------------------------------------------------------ */
@@ -52,6 +54,7 @@ interface EpisodesKnowledgeGraphProps {
   protocolId?: string;
   onClose: () => void;
   onOpenEpisode?: (entry: EpisodeEntry) => void;
+  focusLabel?: string;
 }
 
 type EpCategory =
@@ -654,14 +657,16 @@ function EpStatsBar({ episodes }: { episodes: EpisodeEntry[] }) {
 /*  Main component                                                     */
 /* ------------------------------------------------------------------ */
 
-export function EpisodesKnowledgeGraph({
+function EpisodesKnowledgeGraphInner({
   episodes,
   protocolId,
   onClose,
   onOpenEpisode,
+  focusLabel,
 }: EpisodesKnowledgeGraphProps) {
   const graph = useMemo(() => buildEpisodesGraph(episodes, onOpenEpisode), [episodes, onOpenEpisode]);
   const [hiddenCategories, setHiddenCategories] = useState<Set<EpCategory>>(new Set());
+  const reactFlowInstance = useReactFlow();
 
   const toggleCategory = useCallback((cat: EpCategory) => {
     setHiddenCategories((prev) => {
@@ -709,6 +714,27 @@ export function EpisodesKnowledgeGraph({
     [onOpenEpisode],
   );
 
+  // Auto-zoom to focused node (from deep links)
+  useEffect(() => {
+    if (!focusLabel || !reactFlowInstance) return;
+    const target = focusLabel.toLowerCase();
+    const focusedNode = nodes.find((n) => {
+      const d = n.data as EpNodeData;
+      return d.label.toLowerCase().includes(target) ||
+        (d.subtitle && d.subtitle.toLowerCase().includes(target)) ||
+        (d.meta && Object.values(d.meta).some(v => v.toLowerCase().includes(target)));
+    });
+    if (focusedNode) {
+      setTimeout(() => {
+        reactFlowInstance.fitView({
+          nodes: [{ id: focusedNode.id }],
+          duration: 800,
+          padding: 3,
+        });
+      }, 400);
+    }
+  }, [focusLabel, nodes, reactFlowInstance]);
+
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
       <ReactFlow
@@ -744,5 +770,13 @@ export function EpisodesKnowledgeGraph({
       <EpLegend hiddenCategories={hiddenCategories} onToggleCategory={toggleCategory} />
       <EpStatsBar episodes={episodes} />
     </div>
+  );
+}
+
+export function EpisodesKnowledgeGraph(props: EpisodesKnowledgeGraphProps) {
+  return (
+    <ReactFlowProvider>
+      <EpisodesKnowledgeGraphInner {...props} />
+    </ReactFlowProvider>
   );
 }

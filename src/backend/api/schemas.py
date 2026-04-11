@@ -26,6 +26,9 @@ class Citation(BaseModel):
     year: int | None = None
     url: str | None = None
     quote: str = ""
+    importance: str | None = None        # "high" | "medium" | "low"
+    effect_size: str | None = None       # "large" | "moderate" | "small" | "none"
+    evidence_level: str | None = None    # e.g. "Level A", "Grade I", "1a"
 
 
 class AgentTiming(BaseModel):

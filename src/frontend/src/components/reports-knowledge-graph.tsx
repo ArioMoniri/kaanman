@@ -12,6 +12,8 @@ import {
   applyNodeChanges,
   Handle,
   Position,
+  useReactFlow,
+  ReactFlowProvider,
 } from "@xyflow/react";
 
 /* ------------------------------------------------------------------ */
@@ -47,6 +49,7 @@ export interface ReportsKnowledgeGraphProps {
   onClose: () => void;
   onOpenReport?: (entry: ManifestEntry) => void;
   onOpenPacs?: (entry: ManifestEntry) => void;
+  focusLabel?: string;
 }
 
 type ReportCategory =
@@ -308,9 +311,10 @@ function buildGraph(manifest: ManifestEntry[]): { nodes: Node<GraphNodeData>[]; 
 /*  Main component                                                     */
 /* ------------------------------------------------------------------ */
 
-export function ReportsKnowledgeGraph({ manifest, protocolId, pacsAllStudies, onClose, onOpenReport, onOpenPacs }: ReportsKnowledgeGraphProps) {
+function ReportsKnowledgeGraphInner({ manifest, protocolId, pacsAllStudies, onClose, onOpenReport, onOpenPacs, focusLabel }: ReportsKnowledgeGraphProps) {
   const { nodes: initialNodes, edges } = useMemo(() => buildGraph(manifest), [manifest]);
   const [nodes, setNodes] = useState(initialNodes);
+  const reactFlowInstance = useReactFlow();
 
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => setNodes((nds) => applyNodeChanges(changes, nds) as Node<GraphNodeData>[]),
@@ -326,6 +330,26 @@ export function ReportsKnowledgeGraph({ manifest, protocolId, pacsAllStudies, on
     },
     [onOpenReport],
   );
+
+  // Auto-zoom to focused node (from deep links)
+  useEffect(() => {
+    if (!focusLabel || !reactFlowInstance) return;
+    const target = focusLabel.toLowerCase();
+    const focusedNode = nodes.find((n) => {
+      const d = n.data as GraphNodeData;
+      return d.label.toLowerCase().includes(target) ||
+        (d.entries && d.entries.some(e => e.report_type.toLowerCase().includes(target) || e.report_name.toLowerCase().includes(target)));
+    });
+    if (focusedNode) {
+      setTimeout(() => {
+        reactFlowInstance.fitView({
+          nodes: [{ id: focusedNode.id }],
+          duration: 800,
+          padding: 3,
+        });
+      }, 400);
+    }
+  }, [focusLabel, nodes, reactFlowInstance]);
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
@@ -351,6 +375,14 @@ export function ReportsKnowledgeGraph({ manifest, protocolId, pacsAllStudies, on
         />
       </ReactFlow>
     </div>
+  );
+}
+
+export function ReportsKnowledgeGraph(props: ReportsKnowledgeGraphProps) {
+  return (
+    <ReactFlowProvider>
+      <ReportsKnowledgeGraphInner {...props} />
+    </ReactFlowProvider>
   );
 }
 

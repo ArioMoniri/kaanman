@@ -1014,7 +1014,13 @@ export function KnowledgeGraph({
 }: KnowledgeGraphProps) {
   const hasReports = reportManifest && reportManifest.length > 0;
   const hasEpisodes = episodeManifest && episodeManifest.length > 0;
-  const [activeTab, setActiveTab] = useState<"patient" | "reports" | "episodes">("patient");
+
+  // Auto-switch to the correct tab when focusLabel matches a report type
+  const reportTypeNames = ["muayene", "laboratuvar", "radyoloji", "kardiyoloji", "endoskopi", "sgk", "patoloji"];
+  const focusMatchesReport = focusLabel && hasReports && reportTypeNames.some(rt => focusLabel.toLowerCase().includes(rt));
+  const [activeTab, setActiveTab] = useState<"patient" | "reports" | "episodes">(
+    focusMatchesReport ? "reports" : "patient"
+  );
   const [graphSource, setGraphSource] = useState<"local" | "neo4j">("local");
   const [hiddenCategories, setHiddenCategories] = useState<Set<NodeCategory>>(new Set());
 
@@ -1356,6 +1362,7 @@ export function KnowledgeGraph({
               pacsAllStudies={pacsAllStudies}
               onClose={onClose}
               onOpenReport={onOpenReport}
+              focusLabel={focusLabel}
             />
           ) : activeTab === "episodes" && hasEpisodes ? (
             <EpisodesKnowledgeGraph
@@ -1363,6 +1370,7 @@ export function KnowledgeGraph({
               protocolId={protocolId}
               onClose={onClose}
               onOpenEpisode={onOpenEpisode}
+              focusLabel={focusLabel}
             />
           ) : null}
         </div>

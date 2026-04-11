@@ -501,6 +501,9 @@ class Orchestrator:
                         source=g.get("source", ""), country=g.get("country", ""),
                         year=g.get("year"), url=g.get("url"),
                         quote=g.get("key_recommendation", ""),
+                        importance=g.get("importance"),
+                        effect_size=g.get("effect_size"),
+                        evidence_level=g.get("evidence_level"),
                     ))
                 except Exception:
                     pass

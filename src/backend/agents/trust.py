@@ -64,6 +64,15 @@ Indicators of a non-answer:
 - Repeating the question without providing a real answer
 - Suggesting to "consult a physician" without any clinical analysis
 
+PATIENT-RECORD QUESTIONS:
+When the question is specifically about patient records (e.g., "what are the lab results?", "show me the medications", "what happened during hospitalization?"), adjust scoring criteria:
+- evidence_quality: Score HIGH if the answer accurately cites data from patient records (lab values, dates, diagnoses). External RCTs are NOT required for factual data retrieval.
+- guideline_alignment: Score MODERATE-HIGH as long as data is presented in a clinically meaningful way. External guideline alignment is LESS important for data-retrieval questions.
+- clinical_relevance: Score based on how directly and accurately the patient data answers the question.
+- source_recency: Score based on how recent the patient records are, NOT guideline recency.
+- completeness: Score based on whether ALL relevant patient data was included.
+Patient-record indicators: mentions of specific lab values, dates, episode IDs, medication names from records, "according to the records", specific numerical values from reports.
+
 Also assess your own confidence in this evaluation (0-100). Consider: did the answer contain enough detail for you to evaluate properly? Could you verify the claims?
 
 RESPOND WITH ONLY JSON:
@@ -84,6 +93,23 @@ RESPOND WITH ONLY JSON:
         complete_answer: str,
         agent_outputs: dict[str, Any],
     ) -> dict[str, Any]:
+        # Detect if this is a patient-record-focused question
+        has_patient = "patient_context" in agent_outputs or "patient" in agent_outputs
+        patient_hint = ""
+        if has_patient:
+            # Check if the answer references specific patient data
+            answer_lower = complete_answer.lower()
+            record_indicators = [
+                "lab", "test", "mg/dl", "g/dl", "mmol", "x10", "normal",
+                "elevated", "decreased", "hospitalization", "episode",
+                "medication", "prescription", "diagnosis", "icd",
+                "report", "radyoloji", "muayene", "laboratuvar",
+                "kayıt", "sonuç", "değer", "tarih",
+            ]
+            is_record_q = sum(1 for ind in record_indicators if ind in answer_lower) >= 3
+            if is_record_q:
+                patient_hint = "\nNOTE: This question appears to be about patient records/data. Apply PATIENT-RECORD scoring criteria."
+
         prompt = f"""Score this medical AI response:
 
 QUESTION: {query}
@@ -94,7 +120,7 @@ FAST ANSWER:
 COMPLETE ANSWER:
 {complete_answer[:3000]}
 
-SOURCES USED: {list(agent_outputs.keys())}"""
+SOURCES USED: {list(agent_outputs.keys())}{patient_hint}"""
 
         try:
             raw = await self.call_json(prompt)

@@ -40,7 +40,9 @@ For each guideline found, provide:
 - year: publication year
 - url: ALWAYS include the URL from search results — this is CRITICAL for linking references
 - key_recommendation: the relevant recommendation
-- evidence_level: strength of recommendation if stated
+- evidence_level: strength of recommendation if stated (e.g. "Level A", "Grade I", "1a", "Class IIa")
+- importance: how important this guideline is for the specific query — "high", "medium", or "low"
+- effect_size: if the guideline discusses treatment outcomes, rate the effect size — "large", "moderate", "small", or "none"
 
 IMPORTANT: ALWAYS extract and include the URL for each guideline from the search results.
 The URLs are essential — they are shown as clickable links to doctors reviewing guidelines.
@@ -49,7 +51,7 @@ If a search result has a URL, you MUST include it. Never set url to null if a UR
 Respond with structured JSON:
 {
   "guidelines": [
-    {"title": "...", "source": "...", "country": "...", "year": 2024, "url": "https://...", "key_recommendation": "..."}
+    {"title": "...", "source": "...", "country": "...", "year": 2024, "url": "https://...", "key_recommendation": "...", "evidence_level": "Level A", "importance": "high", "effect_size": "large"}
   ],
   "synthesis": "Brief synthesis of what the guidelines say collectively",
   "disagreements": "Any notable disagreements between guidelines, or 'None'"
