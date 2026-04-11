@@ -174,7 +174,7 @@ function HighlightedContent({ highlights }: { highlights: string[] }) {
         >
           <div className="flex gap-2.5 items-start">
             <span className="mt-1.5 w-2 h-2 rounded-full bg-amber-400 shrink-0 animate-pulse" />
-            <span className="text-[15px] text-gray-200 leading-relaxed">
+            <span className="text-base text-gray-200 leading-relaxed">
               <span className="bg-amber-400/15 px-0.5 rounded">
                 {h.startsWith("**") ? h.slice(2).replace(/\*\*$/, "") : h}
               </span>
@@ -241,7 +241,7 @@ function markdownComponents(onOpenReferenceUrl?: (url: string, title: string) =>
       <h4 className="text-sm font-bold text-gray-200 mt-2 mb-1" {...props}>{children}</h4>
     ),
     p: ({ children, ...props }: React.ComponentPropsWithoutRef<"p">) => (
-      <p className="text-[15px] text-gray-200 leading-relaxed mb-2" {...props}>{children}</p>
+      <p className="text-base text-gray-200 leading-relaxed mb-2" {...props}>{children}</p>
     ),
     strong: ({ children, ...props }: React.ComponentPropsWithoutRef<"strong">) => (
       <strong className="text-gray-100 font-bold" {...props}>{children}</strong>
@@ -256,7 +256,7 @@ function markdownComponents(onOpenReferenceUrl?: (url: string, title: string) =>
       <ol className="list-decimal list-outside ml-5 mb-2 space-y-1" {...props}>{children}</ol>
     ),
     li: ({ children, ...props }: React.ComponentPropsWithoutRef<"li">) => (
-      <li className="text-[15px] text-gray-200 leading-relaxed" {...props}>{children}</li>
+      <li className="text-base text-gray-200 leading-relaxed" {...props}>{children}</li>
     ),
     a: ({ href, children, ...props }: React.ComponentPropsWithoutRef<"a">) => (
       <button
@@ -330,7 +330,7 @@ export function MessageBubble({
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-accent/90 px-4 py-2.5 text-[15px] text-white">
+        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-accent/90 px-4 py-2.5 text-base text-white">
           {message.content}
         </div>
       </div>
@@ -354,11 +354,10 @@ export function MessageBubble({
     message.decision_tree &&
     message.decision_tree.nodes &&
     message.decision_tree.nodes.length > 0;
-  const hasTrustScores = message.trust_scores && message.scorer_confidence !== undefined;
-  // Check if trust scores are real (not all defaults)
+  const hasTrustScores = message.trust_scores != null;
+  // Show gauges if any score is non-zero (real data from scorer)
   const trustScoresAreReal = hasTrustScores &&
-    message.scorer_confidence! > 0 &&
-    !Object.values(message.trust_scores!).every((v) => v === 50);
+    Object.values(message.trust_scores!).some((v) => v > 0);
 
   const priorityCountry = message.priority_country;
   const countryFlag = priorityCountry ? COUNTRY_FLAGS[priorityCountry] : null;

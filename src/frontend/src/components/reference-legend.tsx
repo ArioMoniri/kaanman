@@ -30,27 +30,27 @@ export function ReferenceLegend() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors px-2.5 py-1.5 rounded-lg border border-border/40 hover:border-border/70 bg-surface flex items-center gap-1.5"
+        className="text-xs font-semibold text-gray-400 hover:text-gray-200 transition-colors px-3 py-1.5 rounded-lg border border-border/40 hover:border-border/70 bg-surface flex items-center gap-1.5"
       >
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
           <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 2.5a1 1 0 110 2 1 1 0 010-2zM6.5 7h2v5h-2V7h1z" />
         </svg>
         Legend
-        <span className="text-[9px]">{open ? "\u25B2" : "\u25BC"}</span>
+        <span className="text-[10px]">{open ? "\u25B2" : "\u25BC"}</span>
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-50 w-72 rounded-xl bg-[#1F2023] border border-[#444]/40 shadow-2xl p-3">
-          <p className="text-[11px] text-gray-400 font-semibold mb-2 uppercase tracking-wider">
+        <div className="absolute right-0 top-full mt-1 z-50 w-80 rounded-xl bg-[#1F2023] border border-[#444]/40 shadow-2xl p-4">
+          <p className="text-sm text-gray-300 font-bold mb-3 uppercase tracking-wider">
             Reference Effect Size
           </p>
-          <div className="space-y-2">
+          <div className="space-y-2.5">
             {LEGEND_ITEMS.map((item) => (
-              <div key={item.label} className="flex items-start gap-2">
+              <div key={item.label} className="flex items-start gap-2.5">
                 <Badge variant={item.variant} size="sm" className="mt-0.5 shrink-0">
                   {item.label}
                 </Badge>
-                <span className="text-[10px] text-gray-500 leading-relaxed">
+                <span className="text-xs text-gray-400 leading-relaxed font-medium">
                   {item.desc}
                 </span>
               </div>

@@ -16,7 +16,7 @@ html, body {
   background-color: #131316;
   color: #E5E7EB;
   font-family: var(--font-manrope), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  font-size: 15px;
+  font-size: 17px;
 }
 
 *:focus-visible {
@@ -57,7 +57,7 @@ textarea {
 
 /* Prose content styles for markdown */
 .prose-content {
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.7;
   color: #E5E7EB;
 }

@@ -75,7 +75,7 @@ export function ChatInput({
     <TooltipProvider>
       <div
         className={cn(
-          "rounded-3xl border border-[#444444] bg-[#1F2023] p-2",
+          "flex items-end gap-2 rounded-3xl border border-[#444444] bg-[#1F2023] px-3 py-2",
           "shadow-[0_8px_30px_rgba(0,0,0,0.24)] transition-all duration-300",
           "focus-within:border-[#555555]"
         )}
@@ -90,46 +90,44 @@ export function ChatInput({
           rows={1}
           disabled={isLoading}
           className={cn(
-            "flex w-full rounded-md border-none bg-transparent px-3 py-2.5",
-            "text-base text-gray-100 placeholder:text-gray-400",
+            "flex-1 rounded-md border-none bg-transparent px-1 py-2.5",
+            "text-[16px] text-gray-100 placeholder:text-gray-400",
             "focus-visible:outline-none focus-visible:ring-0",
             "disabled:cursor-not-allowed disabled:opacity-50",
             "min-h-[44px] resize-none"
           )}
         />
 
-        {/* Actions bar */}
-        <div className="flex items-center justify-end gap-2 p-0 pt-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <motion.button
-                onClick={isLoading && onCancel ? onCancel : handleSubmit}
-                disabled={!isLoading && !hasContent}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                className={cn(
-                  "h-8 w-8 rounded-full inline-flex items-center justify-center",
-                  "transition-all duration-200 focus-visible:outline-none",
-                  "disabled:pointer-events-none disabled:opacity-50",
-                  isLoading
-                    ? "bg-red-500 hover:bg-red-400 text-white"
-                    : hasContent
-                      ? "bg-white hover:bg-white/80 text-[#1F2023]"
-                      : "bg-transparent text-[#9CA3AF]"
-                )}
-              >
-                {isLoading ? (
-                  <Square className="h-3.5 w-3.5 fill-current" />
-                ) : (
-                  <ArrowUp className="h-4 w-4" />
-                )}
-              </motion.button>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {isLoading ? "Cancel" : hasContent ? "Send message" : "Type a message"}
-            </TooltipContent>
-          </Tooltip>
-        </div>
+        {/* Send / Cancel button — vertically centered with textarea */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <motion.button
+              onClick={isLoading && onCancel ? onCancel : handleSubmit}
+              disabled={!isLoading && !hasContent}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className={cn(
+                "h-9 w-9 shrink-0 mb-1 rounded-full inline-flex items-center justify-center",
+                "transition-all duration-200 focus-visible:outline-none",
+                "disabled:pointer-events-none disabled:opacity-50",
+                isLoading
+                  ? "bg-red-500 hover:bg-red-400 text-white"
+                  : hasContent
+                    ? "bg-white hover:bg-white/80 text-[#1F2023]"
+                    : "bg-transparent text-[#9CA3AF]"
+              )}
+            >
+              {isLoading ? (
+                <Square className="h-3.5 w-3.5 fill-current" />
+              ) : (
+                <ArrowUp className="h-4 w-4" />
+              )}
+            </motion.button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            {isLoading ? "Cancel" : hasContent ? "Send message" : "Type a message"}
+          </TooltipContent>
+        </Tooltip>
       </div>
     </TooltipProvider>
   );

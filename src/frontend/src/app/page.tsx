@@ -310,8 +310,8 @@ export default function Home() {
           <div className="flex items-center gap-3">
             <CerebraLinkLogo size={38} />
             <div>
-              <h1 className="text-lg font-bold text-gray-100">CerebraLink</h1>
-              <p className="text-xs text-gray-500">Medical AI Assistant</p>
+              <h1 className="text-xl font-bold text-gray-100">CerebraLink</h1>
+              <p className="text-sm text-gray-500">Medical AI Assistant</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
