@@ -136,9 +136,9 @@ function ReportNode({ data }: { data: GraphNodeData }) {
         background: palette.bg,
         border: `1.5px solid ${palette.border}`,
         borderRadius: isCenter ? 16 : 10,
-        padding: isCenter ? "14px 20px" : "8px 14px",
+        padding: isCenter ? "10px 16px" : "6px 12px",
         color: palette.text,
-        fontSize: isCenter ? 14 : 11,
+        fontSize: isCenter ? 12 : 10,
         fontWeight: isCenter ? 700 : 600,
         boxShadow: hovered
           ? `0 0 24px ${palette.glow}, 0 4px 20px rgba(0,0,0,0.4)`
@@ -146,7 +146,7 @@ function ReportNode({ data }: { data: GraphNodeData }) {
         transition: "all 0.2s",
         transform: hovered ? "scale(1.05)" : "scale(1)",
         cursor: "pointer",
-        minWidth: isCenter ? 140 : 100,
+        minWidth: isCenter ? 120 : 85,
         textAlign: "center" as const,
         position: "relative" as const,
       }}
@@ -177,7 +177,7 @@ function ReportNode({ data }: { data: GraphNodeData }) {
             transform: "translateX(-50%)", marginTop: 8,
             background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.1)",
             borderRadius: 8, padding: "8px 12px", fontSize: 10, color: "#d1d5db",
-            minWidth: 260, maxWidth: 380, maxHeight: 340, overflow: "auto",
+            minWidth: 220, maxWidth: "min(320px, 40vw)", maxHeight: "min(260px, 45vh)", overflow: "auto",
             zIndex: 100, boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
             pointerEvents: "all" as const,
           }}>
@@ -268,8 +268,8 @@ function buildGraph(manifest: ManifestEntry[], onOpenReport?: (entry: ManifestEn
   });
 
   const categories = Object.entries(groups);
-  const radius = 280;
-  const SUB_RADIUS = 140;
+  const radius = 220;
+  const SUB_RADIUS = 100;
 
   categories.forEach(([cat, entries], i) => {
     const angle = (2 * Math.PI * i) / categories.length - Math.PI / 2;
@@ -369,10 +369,10 @@ function PacsPanel({ entries, pacsAllStudies, onOpenPacs }: {
     <div
       style={{
         position: "absolute", top: 12, right: 12,
-        background: "rgba(10,10,20,0.95)", backdropFilter: "blur(12px)",
-        border: "1px solid rgba(96,165,250,0.2)", borderRadius: 12,
-        padding: "8px 12px", zIndex: 30, pointerEvents: "all",
-        maxWidth: 360, boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+        background: "rgba(10,10,20,0.97)", backdropFilter: "blur(16px)",
+        border: "1px solid rgba(96,165,250,0.35)", borderRadius: 12,
+        padding: "10px 14px", zIndex: 50, pointerEvents: "all",
+        maxWidth: 340, boxShadow: "0 8px 32px rgba(0,0,0,0.5), 0 0 12px rgba(96,165,250,0.15)",
       }}
     >
       <div
@@ -406,7 +406,7 @@ function PacsPanel({ entries, pacsAllStudies, onOpenPacs }: {
       )}
 
       {expanded && (
-        <div style={{ marginTop: 6, maxHeight: 280, overflowY: "auto" }}>
+        <div style={{ marginTop: 6, maxHeight: "min(280px, 45vh)", overflowY: "auto" }}>
           {entries.map((e, i) => (
             <div
               key={i}
@@ -483,7 +483,7 @@ function ReportsKnowledgeGraphInner({ manifest, protocolId, pacsAllStudies, onCl
         reactFlowInstance.setCenter(
           focusedNode.position.x + 60,
           focusedNode.position.y + 20,
-          { zoom: 1.5, duration: 800 },
+          { zoom: 0.9, duration: 800 },
         );
       }, 500);
     }
@@ -499,8 +499,8 @@ function ReportsKnowledgeGraphInner({ manifest, protocolId, pacsAllStudies, onCl
         onNodesChange={onNodesChange}
         onNodeClick={handleNodeClick}
         nodeTypes={nodeTypes}
-        fitView fitViewOptions={{ padding: 0.3 }}
-        minZoom={0.3} maxZoom={2}
+        fitView fitViewOptions={{ padding: 0.4, maxZoom: 1.0 }}
+        minZoom={0.15} maxZoom={2}
         proOptions={{ hideAttribution: true }}
       >
         <Background color="rgba(255,255,255,0.03)" gap={32} />

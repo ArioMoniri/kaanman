@@ -10,6 +10,7 @@ import {
   type Edge,
   type NodeTypes,
   type OnNodesChange,
+  type ReactFlowInstance,
   applyNodeChanges,
   Handle,
   Position,
@@ -91,7 +92,8 @@ function GraphNode({ data }: { data: GraphNodeData }) {
 
   const hasDetails = data.detailList && data.detailList.length > 0;
   const hasMeta = data.meta && Object.keys(data.meta).length > 0;
-  const showTooltip = (pinned || hovered) && (hasDetails || hasMeta || data.subtitle);
+  // Always show tooltip on hover/pin — even if only a label is available (Neo4j nodes may lack meta/details)
+  const showTooltip = pinned || hovered;
 
   // Close tooltip when clicking outside
   const nodeRef = useRef<HTMLDivElement>(null);
@@ -239,9 +241,9 @@ function GraphNode({ data }: { data: GraphNodeData }) {
             border: `1px solid ${palette.border}40`,
             borderRadius: 12,
             padding: "12px 16px",
-            minWidth: 220,
-            maxWidth: 380,
-            maxHeight: 340,
+            minWidth: 200,
+            maxWidth: "min(340px, 40vw)",
+            maxHeight: "min(280px, 45vh)",
             overflowY: "auto",
             zIndex: 100,
             textAlign: "left",
@@ -960,9 +962,9 @@ function StatsBar({ data }: { data: Record<string, unknown> }) {
                 border: `1px solid ${color}30`,
                 borderRadius: 12,
                 padding: "8px 0",
-                minWidth: 260,
-                maxWidth: 400,
-                maxHeight: 340,
+                minWidth: 240,
+                maxWidth: "min(380px, 45vw)",
+                maxHeight: "min(340px, 55vh)",
                 overflowY: "auto",
                 zIndex: 100,
                 textAlign: "left",
@@ -1071,12 +1073,42 @@ export function KnowledgeGraph({
         const data = await resp.json();
         if (cancelled) return;
         if (data.source === "neo4j" && data.nodes && data.nodes.length > 0) {
-          // Convert Neo4j positions + ensure draggable
-          const apiNodes: Node[] = data.nodes.map((n: Record<string, unknown>) => ({
-            ...n,
-            position: (n.position as { x: number; y: number }) || { x: 0, y: 0 },
-            draggable: true,
-          }));
+          // Convert Neo4j nodes: ensure type, enrich properties→meta/subtitle
+          const apiNodes: Node[] = data.nodes.map((n: Record<string, unknown>) => {
+            const nodeData = (n.data || {}) as Record<string, unknown>;
+            const props = (nodeData.properties || {}) as Record<string, string>;
+
+            // Build meta from Neo4j properties
+            const meta: Record<string, string> = {};
+            const skipKeys = new Set(["updated_at", "patient_id", "created_at"]);
+            for (const [k, v] of Object.entries(props)) {
+              if (v && v !== "null" && v !== "undefined" && !skipKeys.has(k)) {
+                const prettyKey = k.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+                meta[prettyKey] = String(v).length > 120 ? String(v).slice(0, 117) + "..." : String(v);
+              }
+            }
+
+            // Build subtitle from key fields
+            const subtitleParts: string[] = [];
+            if (props.date) subtitleParts.push(props.date);
+            if (props.service) subtitleParts.push(props.service);
+            if (props.icd_code) subtitleParts.push(props.icd_code);
+            if (props.dosage) subtitleParts.push(props.dosage);
+            if (props.facility) subtitleParts.push(props.facility);
+            const subtitle = (nodeData.subtitle as string) || subtitleParts.join(" · ") || undefined;
+
+            return {
+              ...n,
+              type: (n.type as string) || "graphNode",
+              position: (n.position as { x: number; y: number }) || { x: 0, y: 0 },
+              draggable: true,
+              data: {
+                ...nodeData,
+                subtitle,
+                meta: Object.keys(meta).length > 0 ? meta : (nodeData.meta as Record<string, string>) || undefined,
+              },
+            };
+          });
           const apiEdges: Edge[] = (data.edges || []).map((e: Record<string, unknown>) => {
             const category = (e.label as string) || "";
             const colorKey = category.includes("DIAGNOSIS") ? "diagnosis"
@@ -1222,6 +1254,16 @@ export function KnowledgeGraph({
     setNodes(filteredNodes);
   }, [filteredNodes]);
   const backdropRef = useRef<HTMLDivElement>(null);
+  const rfInstance = useRef<ReactFlowInstance | null>(null);
+
+  // Re-fit view when filters change or tab switches back to patient
+  useEffect(() => {
+    if (rfInstance.current && activeTab === "patient") {
+      setTimeout(() => {
+        rfInstance.current?.fitView({ padding: 0.15, duration: 400 });
+      }, 250);
+    }
+  }, [hiddenCategories, activeTab]);
 
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
@@ -1388,8 +1430,67 @@ export function KnowledgeGraph({
               </span>
             )}
           </div>
-          <button
-            onClick={onClose}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {/* Lab Trends button */}
+            {onOpenTrend && (
+              <button
+                onClick={() => onOpenTrend("")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "4px 12px",
+                  borderRadius: 8,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  border: "1px solid rgba(96,165,250,0.3)",
+                  background: "rgba(96,165,250,0.1)",
+                  color: "#60a5fa",
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "rgba(96,165,250,0.2)";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "rgba(96,165,250,0.1)";
+                }}
+                title="Open lab results trend monitor"
+              >
+                <span>📊</span>
+                <span>Lab Trends</span>
+              </button>
+            )}
+            {/* Fit View button */}
+            {activeTab === "patient" && (
+              <button
+                onClick={() => rfInstance.current?.fitView({ padding: 0.15, duration: 400 })}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 8,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.04)",
+                  color: "#9ca3af",
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.08)";
+                  (e.currentTarget as HTMLButtonElement).style.color = "#e5e7eb";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.04)";
+                  (e.currentTarget as HTMLButtonElement).style.color = "#9ca3af";
+                }}
+                title="Fit all nodes in view"
+              >
+                ⊞ Fit
+              </button>
+            )}
+            <button
+              onClick={onClose}
             style={{
               color: "#6b7280",
               fontSize: 18,
@@ -1412,6 +1513,7 @@ export function KnowledgeGraph({
           >
             &times;
           </button>
+          </div>
         </div>
 
         {/* Graph */}
@@ -1435,6 +1537,7 @@ export function KnowledgeGraph({
                   style: { strokeWidth: 1.2, strokeOpacity: 0.6 },
                 }}
                 onInit={(instance) => {
+                  rfInstance.current = instance;
                   // Auto-zoom to the focused cluster — center on the average
                   // position of all focused + related (non-dimmed) nodes
                   if (focusLabel && focusIsolation) {
@@ -1459,7 +1562,7 @@ export function KnowledgeGraph({
                         const dist = Math.sqrt((n.position.x - cx) ** 2 + (n.position.y - cy) ** 2);
                         if (dist > maxDist) maxDist = dist;
                       });
-                      const zoom = maxDist > 500 ? 0.6 : maxDist > 300 ? 0.9 : maxDist > 150 ? 1.2 : 1.5;
+                      const zoom = maxDist > 500 ? 0.5 : maxDist > 300 ? 0.75 : maxDist > 150 ? 1.0 : 1.2;
 
                       setTimeout(() => {
                         instance.setCenter(cx + 60, cy + 20, { zoom, duration: 800 });

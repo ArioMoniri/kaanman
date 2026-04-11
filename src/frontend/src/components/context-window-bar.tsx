@@ -147,29 +147,29 @@ function computeAgentUsage(
     }
   }
 
-  // 2. Determine if a query is currently in-flight
-  //    In-flight = agentStatuses has entries AND the last message is a user message
-  //    (or the last assistant message doesn't yet have agent_timings from the current batch)
-  const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
-  const isQueryInFlight = agentStatuses.length > 0 && (
-    !lastMsg ||
-    lastMsg.role === "user" ||
-    (lastMsg.role === "assistant" && (!lastMsg.agent_timings || lastMsg.agent_timings.length === 0))
-  );
-
-  // 3. If in-flight, collect live agent tokens (not yet in message history)
+  // 2. Always collect from agentStatuses (live streaming + recently completed)
+  //    This ensures agents that appear during streaming are visible even after
+  //    the query completes and agent_timings may not include all of them.
   const liveAgents = new Map<string, { input: number; output: number; running: boolean }>();
-  if (isQueryInFlight) {
-    for (const s of agentStatuses) {
-      if (s.status === "done" && s.tokens) {
-        liveAgents.set(s.agent, {
-          input: s.tokens.input_tokens,
-          output: s.tokens.output_tokens,
-          running: false,
-        });
-      } else if (s.status === "running") {
-        liveAgents.set(s.agent, { input: 0, output: 0, running: true });
-      }
+  for (const s of agentStatuses) {
+    if (s.status === "done" && s.tokens) {
+      liveAgents.set(s.agent, {
+        input: s.tokens.input_tokens,
+        output: s.tokens.output_tokens,
+        running: false,
+      });
+    } else if (s.status === "running") {
+      liveAgents.set(s.agent, { input: 0, output: 0, running: true });
+    }
+  }
+
+  // 3. Determine which live agents are already captured in the latest completed
+  //    message's agent_timings to avoid double-counting
+  const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+  const latestTimingAgents = new Set<string>();
+  if (lastMsg?.role === "assistant" && lastMsg.agent_timings && lastMsg.agent_timings.length > 0) {
+    for (const t of lastMsg.agent_timings) {
+      latestTimingAgents.add(t.agent);
     }
   }
 
@@ -188,13 +188,25 @@ function computeAgentUsage(
     const h = history.get(agent);
     const live = liveAgents.get(agent);
 
-    const totalInput = (h?.totalInput || 0) + (live?.input || 0);
-    const totalOutput = (h?.totalOutput || 0) + (live?.output || 0);
+    // Deduplicate: if agent has history data AND appears in the latest
+    // message's agent_timings, its live data is already captured — skip it
+    const liveAlreadyCaptured = h ? latestTimingAgents.has(agent) : false;
+
+    const effectiveLiveInput = liveAlreadyCaptured ? 0 : (live?.input || 0);
+    const effectiveLiveOutput = liveAlreadyCaptured ? 0 : (live?.output || 0);
+
+    const totalInput = (h?.totalInput || 0) + effectiveLiveInput;
+    const totalOutput = (h?.totalOutput || 0) + effectiveLiveOutput;
     const perQuery = h ? [...h.perQuery] : [];
 
-    const liveInput = live?.input || 0;
-    const liveOutput = live?.output || 0;
-    const isLive = liveAgents.has(agent);
+    // If agent is only from live (no history), add its data as a query entry
+    if (!h && live && !liveAlreadyCaptured && (live.input > 0 || live.output > 0)) {
+      perQuery.push({ input: live.input, output: live.output });
+    }
+
+    const liveInput = effectiveLiveInput;
+    const liveOutput = effectiveLiveOutput;
+    const isLive = !liveAlreadyCaptured && liveAgents.has(agent);
 
     const grandTotal = totalInput + totalOutput;
     const fillPct = (grandTotal / model.contextWindow) * 100;
