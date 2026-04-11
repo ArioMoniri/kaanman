@@ -632,13 +632,13 @@ export default function Home() {
       </div>
 
       {/* Reference Sidebar — fixed to right edge, resizable */}
-      {showReferences && latestRefMsg && (
+      {showReferences && (latestRefMsg || refUrl) && (
         <ResizableSidebar
           onClose={() => { setShowReferences(false); setRefUrl(undefined); setRefTitle(undefined); }}
         >
           <ReferenceSidebar
-            citations={latestRefMsg.citations || []}
-            guidelines={latestRefMsg.guidelines_used || []}
+            citations={latestRefMsg?.citations || []}
+            guidelines={latestRefMsg?.guidelines_used || []}
             onClose={() => { setShowReferences(false); setRefUrl(undefined); setRefTitle(undefined); }}
             initialUrl={refUrl}
             initialTitle={refTitle}

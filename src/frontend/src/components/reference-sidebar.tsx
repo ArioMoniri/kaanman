@@ -32,35 +32,67 @@ const COUNTRY_LABELS: Record<string, string> = {
   USA: "USA", UK: "UK", Europe: "EU", Turkey: "TR", WHO: "WHO",
 };
 
+/** Domains known to block iframe embedding via X-Frame-Options / CSP */
+const BLOCKED_DOMAINS = [
+  "ahajournals.org", "nejm.org", "thelancet.com", "bmj.com",
+  "jamanetwork.com", "nature.com", "springer.com", "wiley.com",
+  "elsevier.com", "sciencedirect.com", "academic.oup.com",
+  "journals.lww.com", "pubmed.ncbi.nlm.nih.gov", "doi.org",
+  "cochranelibrary.com", "uptodate.com", "medscape.com",
+  "mayoclinic.org", "webmd.com", "nice.org.uk", "who.int",
+  "acc.org", "escardio.org", "heart.org",
+];
+
+function isBlockedDomain(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname;
+    return BLOCKED_DOMAINS.some((d) => hostname === d || hostname.endsWith("." + d));
+  } catch {
+    return false;
+  }
+}
+
 /** Embedded browser with iframe load-error detection */
 function EmbeddedBrowser({ url, title, onCopy, onShare, copied }: {
   url: string; title: string; onCopy: () => void; onShare: () => void; copied: boolean;
 }) {
   const [loadFailed, setLoadFailed] = useState(false);
+  const [loading, setLoading] = useState(true);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
 
-  // Reset error state when URL changes
-  useEffect(() => { setLoadFailed(false); }, [url]);
-
-  // Detect iframe load failure via a timeout — if contentWindow is null or
-  // cross-origin after 4s, the site likely blocked framing
+  // Reset state when URL changes — check for known-blocked domains immediately
   useEffect(() => {
-    setLoadFailed(false);
+    if (isBlockedDomain(url)) {
+      setLoadFailed(true);
+      setLoading(false);
+    } else {
+      setLoadFailed(false);
+      setLoading(true);
+    }
+  }, [url]);
+
+  // Timeout: if iframe hasn't signalled load in 5s, assume blocked
+  useEffect(() => {
+    if (isBlockedDomain(url)) return;
+    setLoading(true);
     const timer = setTimeout(() => {
-      try {
-        const iframe = iframeRef.current;
-        if (!iframe) return;
-        // Try to access — will throw for cross-origin blocked frames
-        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-        iframe.contentWindow?.location?.href;
-      } catch {
-        // Cross-origin is normal for working iframes — don't flag
-      }
-    }, 4000);
+      // If still loading after 5s, the site likely blocked framing
+      setLoading(false);
+      setLoadFailed(true);
+    }, 5000);
     return () => clearTimeout(timer);
   }, [url]);
 
-  const handleIframeError = useCallback(() => { setLoadFailed(true); }, []);
+  const handleIframeLoad = useCallback(() => {
+    // iframe fired load — could still be blocked (some browsers fire load anyway)
+    // but at least something happened, give it the benefit of the doubt
+    setLoading(false);
+  }, []);
+
+  const handleIframeError = useCallback(() => {
+    setLoadFailed(true);
+    setLoading(false);
+  }, []);
 
   return (
     <div className="flex flex-col h-full">
@@ -90,18 +122,30 @@ function EmbeddedBrowser({ url, title, onCopy, onShare, copied }: {
             <p className="text-xs text-gray-500 mt-1">The website blocked inline preview (X-Frame-Options)</p>
           </div>
           <a href={url} target="_blank" rel="noopener noreferrer" className="px-4 py-2 rounded-lg bg-accent/90 hover:bg-accent text-white text-sm font-medium transition-colors">
-            Open in new tab
+            Open in new tab &nearr;
           </a>
+          <p className="text-[10px] text-gray-600 mt-1">{title}</p>
         </div>
       ) : (
-        <iframe
-          ref={iframeRef}
-          src={url}
-          className="flex-1 w-full border-none bg-white"
-          sandbox="allow-scripts allow-same-origin allow-popups"
-          title={title}
-          onError={handleIframeError}
-        />
+        <div className="flex-1 relative">
+          {loading && (
+            <div className="absolute inset-0 flex items-center justify-center bg-[#131316] z-10">
+              <div className="flex flex-col items-center gap-2">
+                <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+                <span className="text-xs text-gray-500">Loading preview...</span>
+              </div>
+            </div>
+          )}
+          <iframe
+            ref={iframeRef}
+            src={url}
+            className="w-full h-full border-none bg-white"
+            sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-top-navigation-by-user-activation"
+            title={title}
+            onLoad={handleIframeLoad}
+            onError={handleIframeError}
+          />
+        </div>
       )}
     </div>
   );

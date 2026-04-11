@@ -704,10 +704,19 @@ export function MessageBubble({
                     priorityCountry
                   );
 
+                  const handleCitationClick = () => {
+                    if (c.url && onOpenReferenceUrl) {
+                      onOpenReferenceUrl(c.url, c.title);
+                    } else if (onOpenReferences) {
+                      onOpenReferences();
+                    }
+                  };
+
                   return (
                     <div
                       key={c.index}
-                      className="flex items-start gap-2 px-2.5 py-2 rounded-lg bg-surface/50"
+                      onClick={handleCitationClick}
+                      className="flex items-start gap-2 px-2.5 py-2 rounded-lg bg-surface/50 hover:bg-surface-light cursor-pointer transition-colors group"
                     >
                       <Badge
                         variant={variant}
@@ -718,30 +727,20 @@ export function MessageBubble({
                       </Badge>
                       <div className="min-w-0 flex-1 text-xs">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          {c.url ? (
-                            <button
-                              onClick={() => {
-                                if (onOpenReferenceUrl) {
-                                  onOpenReferenceUrl(c.url!, c.title);
-                                } else {
-                                  window.open(c.url!, "_blank");
-                                }
-                              }}
-                              className="font-semibold text-accent/80 hover:text-accent underline underline-offset-2 text-left"
-                            >
-                              {c.source}
-                            </button>
-                          ) : (
-                            <span className="font-semibold text-gray-300">
-                              {c.source}
-                            </span>
-                          )}
+                          <span className={`font-semibold text-left ${c.url ? "text-accent/80 group-hover:text-accent underline underline-offset-2" : "text-gray-300"}`}>
+                            {c.source}
+                          </span>
                           <Badge variant="pill" size="sm">
                             {COUNTRY_LABELS[c.country] || c.country}
                           </Badge>
                           {c.year && (
                             <span className="text-gray-500 text-[10px]">
                               {c.year}
+                            </span>
+                          )}
+                          {c.url && (
+                            <span className="text-[10px] text-accent/50 group-hover:text-accent/80 ml-auto">
+                              Open &nearr;
                             </span>
                           )}
                         </div>
