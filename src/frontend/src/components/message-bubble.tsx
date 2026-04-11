@@ -1001,11 +1001,6 @@ export function MessageBubble({
                         <div className="text-gray-400 mt-0.5 truncate">
                           {c.title}
                         </div>
-                        {c.url && (
-                          <div className="text-accent/50 mt-0.5 text-[10px] truncate font-mono group-hover:text-accent/70 transition-colors">
-                            {c.url}
-                          </div>
-                        )}
                         {c.quote && (
                           <div className="text-gray-500 mt-0.5 italic text-[11px] line-clamp-2">
                             &quot;{c.quote}&quot;
