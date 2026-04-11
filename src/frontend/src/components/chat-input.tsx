@@ -34,16 +34,30 @@ function useVoiceInput(onTranscript: (text: string) => void) {
   const [isListening, setIsListening] = useState(false);
   const [interim, setInterim] = useState("");
   const [isSupported, setIsSupported] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   // wantListening: true when user toggled ON, false when user toggled OFF.
   // Distinguishes intentional stop from Chrome's auto-stop (silence timeout).
   const wantListeningRef = useRef(false);
+  const networkRetryCountRef = useRef(0);
+  const MAX_NETWORK_RETRIES = 2;
 
   // Detect support after hydration (window unavailable during SSR)
   useEffect(() => {
-    setIsSupported(
-      "SpeechRecognition" in window || "webkitSpeechRecognition" in window
-    );
+    const hasSR =
+      "SpeechRecognition" in window || "webkitSpeechRecognition" in window;
+    // SpeechRecognition also requires a secure context (HTTPS or localhost)
+    const isSecure =
+      window.isSecureContext ||
+      location.hostname === "localhost" ||
+      location.hostname === "127.0.0.1";
+    setIsSupported(hasSR && isSecure);
+    if (hasSR && !isSecure) {
+      console.warn(
+        "[Voice] SpeechRecognition requires HTTPS or localhost. Current origin:",
+        location.origin
+      );
+    }
   }, []);
 
   const createRecognition = useCallback(() => {
@@ -59,12 +73,16 @@ function useVoiceInput(onTranscript: (text: string) => void) {
   const start = useCallback(() => {
     if (!isSupported || recognitionRef.current) return;
     wantListeningRef.current = true;
+    networkRetryCountRef.current = 0;
+    setError(null);
 
     const recognition = createRecognition();
     let finalTranscript = "";
 
     recognition.addEventListener("start", () => {
       setIsListening(true);
+      setError(null);
+      networkRetryCountRef.current = 0; // reset on successful start
     });
 
     recognition.addEventListener("result", (event) => {
@@ -90,7 +108,40 @@ function useVoiceInput(onTranscript: (text: string) => void) {
       const errCode = (event as any).error as string | undefined;
       // "aborted" = user stopped; "no-speech" = silence timeout — both normal
       if (errCode === "aborted" || errCode === "no-speech") return;
+
+      // "network" = can't reach Google speech servers — retry a couple of times
+      if (errCode === "network") {
+        networkRetryCountRef.current += 1;
+        if (
+          networkRetryCountRef.current <= MAX_NETWORK_RETRIES &&
+          wantListeningRef.current
+        ) {
+          console.warn(
+            `[Voice] Network error, retrying (${networkRetryCountRef.current}/${MAX_NETWORK_RETRIES})...`
+          );
+          // The "end" event fires after error — the restart happens there
+          return;
+        }
+        // Exhausted retries
+        console.warn("[Voice] Network error persists after retries");
+        setError(
+          location.protocol === "https:" || location.hostname === "localhost"
+            ? "Could not reach speech service — check your internet connection"
+            : "Voice input requires HTTPS. Access via localhost or enable HTTPS."
+        );
+        wantListeningRef.current = false;
+        recognitionRef.current = null;
+        setIsListening(false);
+        setInterim("");
+        return;
+      }
+
       // "not-allowed" = mic permission denied
+      if (errCode === "not-allowed" || errCode === "service-not-allowed") {
+        setError("Microphone access denied — check browser permissions");
+      } else {
+        setError(`Voice error: ${errCode}`);
+      }
       console.warn("[Voice] SpeechRecognition error:", errCode);
       wantListeningRef.current = false;
       recognitionRef.current = null;
@@ -103,7 +154,23 @@ function useVoiceInput(onTranscript: (text: string) => void) {
       // If the user still wants to listen, auto-restart silently.
       if (wantListeningRef.current) {
         try {
-          recognition.start();
+          // Small delay before retry on network errors to avoid tight loop
+          const delay = networkRetryCountRef.current > 0 ? 500 : 0;
+          if (delay > 0) {
+            setTimeout(() => {
+              if (!wantListeningRef.current) return;
+              try {
+                recognition.start();
+              } catch {
+                wantListeningRef.current = false;
+                recognitionRef.current = null;
+                setIsListening(false);
+                setInterim("");
+              }
+            }, delay);
+          } else {
+            recognition.start();
+          }
           return; // keep isListening true
         } catch {
           // If restart fails (e.g., mic revoked), give up
@@ -142,6 +209,8 @@ function useVoiceInput(onTranscript: (text: string) => void) {
     }
   }, [isListening, start, stop]);
 
+  const clearError = useCallback(() => setError(null), []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -154,7 +223,7 @@ function useVoiceInput(onTranscript: (text: string) => void) {
     };
   }, []);
 
-  return { isListening, interim, isSupported, toggle, stop };
+  return { isListening, interim, isSupported, error, toggle, stop, clearError };
 }
 
 /* ---------- ChatInput ---------- */
@@ -208,6 +277,18 @@ export function ChatInput({
 
   return (
     <TooltipProvider>
+      {/* Voice error banner */}
+      {voice.error && (
+        <div className="mb-2 flex items-center gap-2 rounded-xl bg-red-500/10 border border-red-500/30 px-3 py-2 text-sm text-red-300">
+          <span className="flex-1">{voice.error}</span>
+          <button
+            onClick={voice.clearError}
+            className="shrink-0 text-red-400 hover:text-red-200 transition-colors text-xs font-medium"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       <div
         className={cn(
           "flex items-end gap-2 rounded-3xl border border-[#444444] bg-[#1F2023] px-3 py-2",
