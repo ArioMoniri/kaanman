@@ -104,6 +104,77 @@ async def transcribe_audio(
 
     result = resp.json()
     text = result.get("text", "").strip()
+    text = _normalize_spoken_numbers(text)
     log.info("Transcription result (%s): %d chars", provider, len(text))
 
     return {"text": text, "provider": provider}
+
+
+# ── Spoken number normalization (Turkish + English) ──
+
+_TR_NUMBERS: dict[str, str] = {
+    "sıfır": "0", "bir": "1", "iki": "2", "üç": "3", "dört": "4",
+    "beş": "5", "altı": "6", "yedi": "7", "sekiz": "8", "dokuz": "9",
+    "on": "10", "yirmi": "20", "otuz": "30", "kırk": "40", "elli": "50",
+    "altmış": "60", "yetmiş": "70", "seksen": "80", "doksan": "90",
+    "yüz": "100",
+}
+
+_EN_NUMBERS: dict[str, str] = {
+    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+    "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+    "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13",
+    "fourteen": "14", "fifteen": "15", "sixteen": "16", "seventeen": "17",
+    "eighteen": "18", "nineteen": "19", "twenty": "20", "thirty": "30",
+    "forty": "40", "fifty": "50", "sixty": "60", "seventy": "70",
+    "eighty": "80", "ninety": "90", "hundred": "100",
+}
+
+
+def _normalize_spoken_numbers(text: str) -> str:
+    """Convert spoken digit sequences to numeric form.
+
+    Handles Turkish (yetmiş iki → 72) and English (seventy two → 72).
+    Collapses space-separated digit groups into single numbers:
+      "70 21 48 97" → "70214897"
+    """
+    import re
+
+    all_numbers = {**_TR_NUMBERS, **_EN_NUMBERS}
+    words = text.split()
+    result: list[str] = []
+    num_buffer: list[int] = []
+
+    def flush_buffer():
+        if num_buffer:
+            # Combine: [70, 2] → 72; [70, 21, 48, 97] → "70214897"
+            # Heuristic: if numbers are tens+units pairs, combine arithmetically
+            # Otherwise concatenate as strings (protocol IDs)
+            combined = ""
+            i = 0
+            while i < len(num_buffer):
+                n = num_buffer[i]
+                # tens + single digit → add (e.g., 70 + 2 = 72)
+                if n >= 10 and n % 10 == 0 and n < 100 and i + 1 < len(num_buffer) and num_buffer[i + 1] < 10:
+                    combined += str(n + num_buffer[i + 1])
+                    i += 2
+                else:
+                    combined += str(n)
+                    i += 1
+            result.append(combined)
+            num_buffer.clear()
+
+    for word in words:
+        clean = word.strip(".,;:!?").lower()
+        if clean in all_numbers:
+            num_buffer.append(int(all_numbers[clean]))
+        else:
+            flush_buffer()
+            result.append(word)
+
+    flush_buffer()
+
+    out = " ".join(result)
+    # Also collapse digit groups separated by single spaces or dashes
+    out = re.sub(r"(\d)\s*[-–—]\s*(\d)", r"\1\2", out)
+    return out

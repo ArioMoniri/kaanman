@@ -271,12 +271,12 @@ export function StatusBar({ agents, elapsed, totalTokens }: StatusBarProps) {
         transition: { duration: 0.3, ease: [0.2, 0.65, 0.3, 0.9] },
       }}
     >
-      {/* Shimmer header — latest running agent */}
-      {latestRunning && (
-        <div className="px-3 py-2.5 border-b border-[#444]/20">
-          <ShimmerText text={latestRunning.message || "Processing..."} />
-        </div>
-      )}
+      {/* Shimmer header — always visible while status bar is shown */}
+      <div className="px-3 py-2.5 border-b border-[#444]/20">
+        <ShimmerText
+          text={latestRunning?.message || (doneCount === agents.length ? "Finalizing response..." : "Processing...")}
+        />
+      </div>
 
       <LayoutGroup>
         <div className="p-2 overflow-hidden">

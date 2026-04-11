@@ -76,10 +76,12 @@ const COLORS: Record<NodeCategory, { bg: string; bgEnd: string; border: string; 
 /*  Custom card-style node with hover tooltip                          */
 /* ------------------------------------------------------------------ */
 
+const DEFAULT_COLOR = { bg: "#1f2937", bgEnd: "#111827", border: "#9ca3af", text: "#e5e7eb", glow: "rgba(156,163,175,0.15)", icon: "📋" };
+
 function GraphNode({ data }: { data: GraphNodeData }) {
   const [hovered, setHovered] = useState(false);
   const cat = data.category;
-  const palette = COLORS[cat];
+  const palette = COLORS[cat] || DEFAULT_COLOR;
   const isCenter = cat === "patient";
   const isFocused = !!data.focused;
 

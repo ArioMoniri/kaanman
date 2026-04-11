@@ -215,7 +215,13 @@ async def session_info(session_id: str):
     patient_ctx = await mem.get_patient_context()
     summary = None
     if patient_ctx:
-        summary = patient_ctx.get("summary", "Patient data loaded.")
+        raw_summary = patient_ctx.get("summary", "Patient data loaded.")
+        # Ensure summary is a string — backend may store it as a dict
+        if isinstance(raw_summary, dict):
+            import json as _json
+            summary = _json.dumps(raw_summary, ensure_ascii=False)
+        else:
+            summary = str(raw_summary) if raw_summary is not None else None
     return SessionInfoResponse(**info, patient_summary=summary)
 
 

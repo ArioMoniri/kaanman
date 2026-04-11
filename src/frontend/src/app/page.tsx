@@ -940,19 +940,28 @@ export default function Home() {
             />
           ))}
 
-          {/* Status bar */}
-          {isLoading && agentStatuses.length > 0 && (
-            <StatusBar
-              agents={agentStatuses}
-              elapsed={elapsed}
-              totalTokens={totalTokens}
-            />
-          )}
-
-          {isLoading && agentStatuses.length === 0 && (
-            <div className="pl-2">
-              <ShimmerText text="Connecting to agent council..." showChevron={false} />
-            </div>
+          {/* Status bar + persistent shimmer during loading */}
+          {isLoading && (
+            <>
+              {agentStatuses.length > 0 ? (
+                <StatusBar
+                  agents={agentStatuses}
+                  elapsed={elapsed}
+                  totalTokens={totalTokens}
+                />
+              ) : (
+                <div className="pl-2">
+                  <ShimmerText text="Connecting to agent council..." showChevron={false} />
+                </div>
+              )}
+              {/* Always-visible shimmer indicator while loading */}
+              <div className="pl-2 pb-1">
+                <ShimmerText
+                  text={agentStatuses.length > 0 ? "Waiting for agents to complete..." : "Initializing pipeline..."}
+                  showChevron={false}
+                />
+              </div>
+            </>
           )}
           <div ref={messagesEndRef} />
         </div>

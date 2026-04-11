@@ -222,11 +222,10 @@ function useVoiceInput(onTranscript: (text: string) => void) {
         setInterim("Transcribing...");
 
         try {
-          const lang = navigator.language?.split("-")[0] || undefined;
+          // Don't force language — let Whisper auto-detect the spoken language
           const form = new FormData();
           const ext = mimeType.includes("webm") ? "webm" : "ogg";
           form.append("file", blob, `recording.${ext}`);
-          if (lang) form.append("language", lang);
 
           const resp = await fetch(`${API_URL}/api/transcribe`, {
             method: "POST",
@@ -240,7 +239,16 @@ function useVoiceInput(onTranscript: (text: string) => void) {
 
           const data = await resp.json();
           if (data.text && data.text.trim()) {
-            onTranscript(data.text.trim());
+            // Normalize protocol numbers: spoken digits may come as words or
+            // separated groups ("70 21 48 97", "yetmiş iki on dört...").
+            // Strip spaces/dashes between digit groups to form a single protocol ID.
+            let text = data.text.trim();
+            // Collapse digit groups separated only by spaces/dashes into one number
+            // e.g., "70 21 48 97" → "70214897", "70-21-48-97" → "70214897"
+            text = text.replace(/(\d)\s*[-–—]\s*(\d)/g, "$1$2");
+            // Collapse sequences of space-separated 2-3 digit groups
+            text = text.replace(/\b(\d{2,3})\s+(?=\d{2,3}\b)/g, "$1");
+            onTranscript(text);
           }
         } catch (e) {
           console.error("[Voice] Transcription failed:", e);
@@ -390,7 +398,7 @@ export function ChatInput({
 }: ChatInputProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const maxHeight = 240;
+  const maxHeight = 128;
 
   const handleVoiceTranscript = useCallback((text: string) => {
     setValue((prev) => (prev ? prev + " " + text : text));
@@ -402,8 +410,10 @@ export function ChatInput({
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
-  }, [value]);
+    const h = Math.min(el.scrollHeight, maxHeight);
+    el.style.height = `${h}px`;
+    el.style.overflowY = h >= maxHeight ? "auto" : "hidden";
+  }, [value, maxHeight]);
 
   const handleSubmit = () => {
     const trimmed = value.trim();
