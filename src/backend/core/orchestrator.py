@@ -68,6 +68,7 @@ class OrchestratorResult:
         self.decision_tree: DecisionTree | None = None
         self.language: str = "en"
         self.priority_country: str = ""
+        self.patient_context: dict | None = None
 
     def model_dump(self) -> dict:
         return {
@@ -86,6 +87,7 @@ class OrchestratorResult:
             "decision_tree": self.decision_tree,
             "language": self.language,
             "priority_country": self.priority_country,
+            "patient_context": self.patient_context,
         }
 
 
@@ -122,6 +124,10 @@ class Orchestrator:
         t_start = time.monotonic()
         result = OrchestratorResult()
         shared = SharedMemory(session_id)
+
+        # Store patient context if already available from session
+        if patient_context:
+            result.patient_context = patient_context
 
         # ── 1. Route & guardrail ──
         await self._emit(on_status, {
@@ -177,6 +183,7 @@ class Orchestrator:
                 t_fetch = int((time.monotonic() - t0) * 1000)
                 result.agents_used.append("patient_fetch")
                 result.agent_timings.append(AgentTiming(agent="patient_fetch", time_ms=t_fetch))
+                result.patient_context = patient_context
                 await self._emit(on_status, {
                     "agent": "patient_fetch", "status": "done",
                     "time_ms": t_fetch, "message": "Patient data loaded & PHI-masked",

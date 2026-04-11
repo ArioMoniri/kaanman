@@ -128,6 +128,7 @@ export default function Home() {
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let eventType = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -136,8 +137,6 @@ export default function Home() {
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
-
-        let eventType = "";
 
         for (const line of lines) {
           if (line.startsWith("event: ")) {

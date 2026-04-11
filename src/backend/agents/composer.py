@@ -23,10 +23,18 @@ def _build_context(
     citations: list[Citation] | None = None,
 ) -> str:
     """Build the shared context prompt for both fast and complete composers."""
+    lang_name = {
+        "tr": "Turkish (Türkçe)", "en": "English", "de": "German (Deutsch)",
+        "fr": "French (Français)", "es": "Spanish (Español)",
+        "ar": "Arabic", "ru": "Russian", "zh": "Chinese",
+    }.get(route.language, route.language)
+
     parts = [
         f"ORIGINAL QUESTION: {query}",
         f"CATEGORY: {route.category} | URGENCY: {route.urgency}/5",
-        f"LANGUAGE: {route.language} (respond in THIS language)",
+        f"LANGUAGE: {route.language} — You MUST write your ENTIRE response in {lang_name}. "
+        f"Every word, heading, bullet point, and recommendation must be in {lang_name}. "
+        f"Do NOT mix languages. Do NOT respond in English unless the question is in English.",
     ]
 
     if citations:
