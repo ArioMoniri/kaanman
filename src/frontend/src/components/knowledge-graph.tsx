@@ -1135,7 +1135,10 @@ export function KnowledgeGraph({
     return () => { cancelled = true; };
   }, [protocolId]);
 
-  const initialGraph = neo4jGraph || inlineGraph;
+  // When deep-linked focus is active, stay on inline graph to preserve
+  // focus matching — Neo4j node labels may differ from inline, causing
+  // focus to fail and the view to revert to unfiltered
+  const initialGraph = (focusLabel && focusIsolation) ? inlineGraph : (neo4jGraph || inlineGraph);
 
   // If focusLabel is provided and isolation is active, mark matching nodes as focused,
   // their neighbors as related, and everything else as dimmed
@@ -1256,14 +1259,15 @@ export function KnowledgeGraph({
   const backdropRef = useRef<HTMLDivElement>(null);
   const rfInstance = useRef<ReactFlowInstance | null>(null);
 
-  // Re-fit view when filters change or tab switches back to patient
+  // Re-fit view when filters change, tab switches, or graph source changes
+  // (but NOT when focus is active — focused zoom should be preserved)
   useEffect(() => {
-    if (rfInstance.current && activeTab === "patient") {
+    if (rfInstance.current && activeTab === "patient" && !(focusLabel && focusIsolation)) {
       setTimeout(() => {
-        rfInstance.current?.fitView({ padding: 0.15, duration: 400 });
+        rfInstance.current?.fitView({ padding: 0.15, duration: 400, maxZoom: 0.85 });
       }, 250);
     }
-  }, [hiddenCategories, activeTab]);
+  }, [hiddenCategories, activeTab, graphSource, focusLabel, focusIsolation]);
 
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
@@ -1324,7 +1328,7 @@ export function KnowledgeGraph({
             zIndex: 20,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, overflow: "hidden", minWidth: 0 }}>
             <div
               style={{
                 width: 8,
@@ -1333,6 +1337,7 @@ export function KnowledgeGraph({
                 background: "linear-gradient(135deg, #818cf8, #6366f1)",
                 boxShadow: "0 0 12px rgba(129,140,248,0.5)",
                 animation: "pulse 2s infinite",
+                flexShrink: 0,
               }}
             />
             {/* Tab switcher */}
@@ -1432,7 +1437,7 @@ export function KnowledgeGraph({
               </span>
             )}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
             {/* Lab Trends button */}
             {onOpenTrend && (
               <button
@@ -1528,8 +1533,6 @@ export function KnowledgeGraph({
                 onNodesChange={onNodesChange}
                 nodeTypes={nodeTypes}
                 nodesDraggable
-                fitView
-                fitViewOptions={{ padding: 0.2, maxZoom: 0.85 }}
                 colorMode="dark"
                 minZoom={0.02}
                 maxZoom={3}
@@ -1540,10 +1543,8 @@ export function KnowledgeGraph({
                 }}
                 onInit={(instance) => {
                   rfInstance.current = instance;
-                  // Auto-zoom to the focused cluster — center on the average
-                  // position of all focused + related (non-dimmed) nodes
                   if (focusLabel && focusIsolation) {
-                    // Use filteredNodes (which has focus/dimmed data) instead of nodes state
+                    // Auto-zoom to the focused cluster
                     const currentNodes = filteredNodes;
                     const focusedNodes = currentNodes.filter((n) => (n.data as GraphNodeData).focused);
                     const relevantNodes = currentNodes.filter((n) => {
@@ -1552,13 +1553,11 @@ export function KnowledgeGraph({
                     });
 
                     if (focusedNodes.length > 0) {
-                      // Compute center of focused nodes
                       let cx = 0, cy = 0;
                       focusedNodes.forEach((n) => { cx += n.position.x; cy += n.position.y; });
                       cx /= focusedNodes.length;
                       cy /= focusedNodes.length;
 
-                      // Choose zoom based on cluster spread
                       let maxDist = 0;
                       relevantNodes.forEach((n) => {
                         const dist = Math.sqrt((n.position.x - cx) ** 2 + (n.position.y - cy) ** 2);
@@ -1570,11 +1569,15 @@ export function KnowledgeGraph({
                         instance.setCenter(cx + 60, cy + 20, { zoom, duration: 800 });
                       }, 400);
                     } else {
-                      // No focused nodes found — just fitView normally
                       setTimeout(() => {
-                        instance.fitView({ padding: 0.15, duration: 600 });
+                        instance.fitView({ padding: 0.15, duration: 600, maxZoom: 0.85 });
                       }, 300);
                     }
+                  } else {
+                    // No focus — fit all nodes with comfortable zoom cap
+                    setTimeout(() => {
+                      instance.fitView({ padding: 0.15, duration: 600, maxZoom: 0.85 });
+                    }, 300);
                   }
                 }}
               >
