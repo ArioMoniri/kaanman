@@ -894,6 +894,18 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2">
             <ReferenceLegend />
+            {patientData && (
+              <button
+                onClick={() => handleOpenTrend("")}
+                className="text-xs text-sky-400/80 hover:text-sky-400 transition-colors px-3 py-1.5 rounded-lg border border-sky-500/30 hover:border-sky-500/50 flex items-center gap-1"
+                title="Open lab results trend monitor"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                </svg>
+                Lab Trends
+              </button>
+            )}
             <ContextWindowBar messages={messages} agentStatuses={agentStatuses} />
             {patientData && (
               <button

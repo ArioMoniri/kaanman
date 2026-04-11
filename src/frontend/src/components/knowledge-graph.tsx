@@ -1251,23 +1251,37 @@ export function KnowledgeGraph({
 
   const [nodes, setNodes] = useState<Node[]>(filteredNodes);
   const edges = filteredEdges;
+  const prevFilteredRef = useRef(filteredNodes);
+  const initialFocusDoneRef = useRef(false);
 
-  // Update nodes when graph source or filters change
+  // Update nodes when graph source or filters change — but guard against
+  // no-op updates that would trigger ReactFlow re-layout
   useEffect(() => {
-    setNodes(filteredNodes);
+    if (filteredNodes !== prevFilteredRef.current) {
+      prevFilteredRef.current = filteredNodes;
+      setNodes(filteredNodes);
+    }
   }, [filteredNodes]);
   const backdropRef = useRef<HTMLDivElement>(null);
   const rfInstance = useRef<ReactFlowInstance | null>(null);
 
-  // Re-fit view when filters change, tab switches, or graph source changes
-  // (but NOT when focus is active — focused zoom should be preserved)
+  // Re-fit view when user explicitly changes filters or tab
+  // SKIP when focus is active — focused zoom must be preserved
+  // SKIP when graphSource changes silently (Neo4j load)
+  const prevHiddenRef = useRef(hiddenCategories);
+  const prevTabRef = useRef(activeTab);
   useEffect(() => {
+    const hiddenChanged = hiddenCategories !== prevHiddenRef.current;
+    const tabChanged = activeTab !== prevTabRef.current;
+    prevHiddenRef.current = hiddenCategories;
+    prevTabRef.current = activeTab;
+    if (!hiddenChanged && !tabChanged) return; // only refit on user actions
     if (rfInstance.current && activeTab === "patient" && !(focusLabel && focusIsolation)) {
       setTimeout(() => {
         rfInstance.current?.fitView({ padding: 0.15, duration: 400, maxZoom: 0.85 });
       }, 250);
     }
-  }, [hiddenCategories, activeTab, graphSource, focusLabel, focusIsolation]);
+  }, [hiddenCategories, activeTab, focusLabel, focusIsolation]);
 
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
@@ -1543,8 +1557,9 @@ export function KnowledgeGraph({
                 }}
                 onInit={(instance) => {
                   rfInstance.current = instance;
-                  if (focusLabel && focusIsolation) {
-                    // Auto-zoom to the focused cluster
+                  if (focusLabel && focusIsolation && !initialFocusDoneRef.current) {
+                    initialFocusDoneRef.current = true;
+                    // Auto-zoom to the focused cluster — runs once
                     const currentNodes = filteredNodes;
                     const focusedNodes = currentNodes.filter((n) => (n.data as GraphNodeData).focused);
                     const relevantNodes = currentNodes.filter((n) => {
@@ -1573,7 +1588,7 @@ export function KnowledgeGraph({
                         instance.fitView({ padding: 0.15, duration: 600, maxZoom: 0.85 });
                       }, 300);
                     }
-                  } else {
+                  } else if (!focusLabel) {
                     // No focus — fit all nodes with comfortable zoom cap
                     setTimeout(() => {
                       instance.fitView({ padding: 0.15, duration: 600, maxZoom: 0.85 });

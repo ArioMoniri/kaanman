@@ -208,8 +208,8 @@ function ReportNode({ data }: { data: GraphNodeData }) {
                 </div>
                 <div style={{ color: "#6b7280", fontSize: 9 }}>{e.date} &middot; {e.facility}</div>
               </div>
-              {e.accession_number && (
-                <div style={{ display: "flex", gap: 4, marginTop: 2, paddingLeft: 4 }}>
+              <div style={{ display: "flex", gap: 4, marginTop: 2, paddingLeft: 4 }}>
+                {e.accession_number ? (
                   <button
                     onClick={(ev) => { ev.stopPropagation(); if (data.onOpenPacs) data.onOpenPacs(e); }}
                     style={{
@@ -225,8 +225,23 @@ function ReportNode({ data }: { data: GraphNodeData }) {
                     <span>PACS</span>
                     <span style={{ fontSize: 7, opacity: 0.7 }}>{e.accession_number}</span>
                   </button>
-                </div>
-              )}
+                ) : (
+                  <button
+                    onClick={(ev) => { ev.stopPropagation(); if (data.onOpenReport) data.onOpenReport(e); }}
+                    style={{
+                      fontSize: 8, color: "#818cf8", fontWeight: 600,
+                      background: "rgba(129,140,248,0.08)", border: "1px solid rgba(129,140,248,0.15)",
+                      padding: "2px 8px", borderRadius: 4, cursor: "pointer",
+                      transition: "all 0.15s", display: "flex", alignItems: "center", gap: 3,
+                    }}
+                    onMouseEnter={(ev) => { (ev.currentTarget as HTMLButtonElement).style.background = "rgba(129,140,248,0.2)"; }}
+                    onMouseLeave={(ev) => { (ev.currentTarget as HTMLButtonElement).style.background = "rgba(129,140,248,0.08)"; }}
+                    title="Open report"
+                  >
+                    <span>View Report</span>
+                  </button>
+                )}
+              </div>
             </div>
           ))}
           {data.entries.length > 20 && (
@@ -358,12 +373,16 @@ function buildGraph(manifest: ManifestEntry[], onOpenReport?: (entry: ManifestEn
 /*  PACS quick-access panel                                            */
 /* ------------------------------------------------------------------ */
 
-function PacsPanel({ entries, pacsAllStudies, onOpenPacs }: {
+function PacsPanel({ entries, pacsAllStudies, onOpenPacs, allRadiologyEntries }: {
   entries: ManifestEntry[];
   pacsAllStudies?: string;
   onOpenPacs?: (entry: ManifestEntry) => void;
+  allRadiologyEntries?: ManifestEntry[];
 }) {
   const [expanded, setExpanded] = useState(false);
+  const radioEntries = allRadiologyEntries || [];
+  const totalPacs = entries.length;
+  const totalRadiology = radioEntries.length;
 
   return (
     <div
@@ -372,7 +391,7 @@ function PacsPanel({ entries, pacsAllStudies, onOpenPacs }: {
         background: "rgba(10,10,20,0.97)", backdropFilter: "blur(16px)",
         border: "1px solid rgba(96,165,250,0.35)", borderRadius: 12,
         padding: "10px 14px", zIndex: 50, pointerEvents: "all",
-        maxWidth: 340, boxShadow: "0 8px 32px rgba(0,0,0,0.5), 0 0 12px rgba(96,165,250,0.15)",
+        maxWidth: 360, boxShadow: "0 8px 32px rgba(0,0,0,0.5), 0 0 12px rgba(96,165,250,0.15)",
       }}
     >
       <div
@@ -381,7 +400,10 @@ function PacsPanel({ entries, pacsAllStudies, onOpenPacs }: {
       >
         <span style={{ fontSize: 12 }}>🏥</span>
         <span style={{ fontSize: 11, fontWeight: 700, color: "#60a5fa" }}>
-          PACS ({entries.length})
+          PACS Radiology
+        </span>
+        <span style={{ fontSize: 9, color: "#93c5fd", background: "rgba(96,165,250,0.15)", padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>
+          {totalPacs} linked{totalRadiology > totalPacs ? ` · ${totalRadiology} total` : ""}
         </span>
         <span style={{ fontSize: 9, color: "#6b7280", marginLeft: "auto" }}>
           {expanded ? "▲" : "▼"}
@@ -394,25 +416,32 @@ function PacsPanel({ entries, pacsAllStudies, onOpenPacs }: {
           target="_blank"
           rel="noopener noreferrer"
           style={{
-            display: "block", marginTop: 6, fontSize: 9, fontWeight: 600,
-            color: "#34d399", background: "rgba(52,211,153,0.1)",
-            border: "1px solid rgba(52,211,153,0.2)", borderRadius: 6,
-            padding: "4px 8px", textAlign: "center", textDecoration: "none",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+            marginTop: 6, fontSize: 10, fontWeight: 700,
+            color: "#34d399", background: "rgba(52,211,153,0.12)",
+            border: "1px solid rgba(52,211,153,0.3)", borderRadius: 8,
+            padding: "6px 10px", textDecoration: "none",
             transition: "all 0.15s",
           }}
+          onMouseEnter={(ev) => { (ev.currentTarget as HTMLAnchorElement).style.background = "rgba(52,211,153,0.22)"; }}
+          onMouseLeave={(ev) => { (ev.currentTarget as HTMLAnchorElement).style.background = "rgba(52,211,153,0.12)"; }}
         >
-          View All Studies in PACS ↗
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2" y="2" width="20" height="20" rx="5" />
+            <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+          </svg>
+          View All Studies in PACS Viewer
         </a>
       )}
 
       {expanded && (
         <div style={{ marginTop: 6, maxHeight: "min(280px, 45vh)", overflowY: "auto" }}>
-          {entries.map((e, i) => (
+          {(entries.length > 0 ? entries : radioEntries).map((e, i) => (
             <div
               key={i}
               style={{
                 padding: "4px 6px",
-                borderBottom: i < entries.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none",
+                borderBottom: i < (entries.length > 0 ? entries : radioEntries).length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none",
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -420,22 +449,29 @@ function PacsPanel({ entries, pacsAllStudies, onOpenPacs }: {
                   <div style={{ fontSize: 10, fontWeight: 600, color: "#d1d5db", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {e.report_name}
                   </div>
-                  <div style={{ fontSize: 9, color: "#6b7280" }}>{e.date}</div>
+                  <div style={{ fontSize: 9, color: "#6b7280" }}>
+                    {e.date}
+                    {e.accession_number && <span style={{ color: "#60a5fa", marginLeft: 4 }}>Acc: {e.accession_number}</span>}
+                  </div>
                 </div>
-                <button
-                  onClick={(ev) => { ev.stopPropagation(); if (onOpenPacs) onOpenPacs(e); }}
-                  style={{
-                    fontSize: 8, color: "#60a5fa", fontWeight: 600,
-                    background: "rgba(96,165,250,0.1)", border: "1px solid rgba(96,165,250,0.2)",
-                    padding: "3px 8px", borderRadius: 4, cursor: "pointer",
-                    transition: "all 0.15s", flexShrink: 0,
-                  }}
-                  onMouseEnter={(ev) => { (ev.currentTarget as HTMLButtonElement).style.background = "rgba(96,165,250,0.25)"; }}
-                  onMouseLeave={(ev) => { (ev.currentTarget as HTMLButtonElement).style.background = "rgba(96,165,250,0.1)"; }}
-                  title={`Open PACS (Acc: ${e.accession_number})`}
-                >
-                  PACS ↗
-                </button>
+                {e.accession_number ? (
+                  <button
+                    onClick={(ev) => { ev.stopPropagation(); if (onOpenPacs) onOpenPacs(e); }}
+                    style={{
+                      fontSize: 9, color: "#60a5fa", fontWeight: 600,
+                      background: "rgba(96,165,250,0.1)", border: "1px solid rgba(96,165,250,0.25)",
+                      padding: "3px 10px", borderRadius: 6, cursor: "pointer",
+                      transition: "all 0.15s", flexShrink: 0,
+                    }}
+                    onMouseEnter={(ev) => { (ev.currentTarget as HTMLButtonElement).style.background = "rgba(96,165,250,0.25)"; }}
+                    onMouseLeave={(ev) => { (ev.currentTarget as HTMLButtonElement).style.background = "rgba(96,165,250,0.1)"; }}
+                    title={`Open PACS (Acc: ${e.accession_number})`}
+                  >
+                    PACS ↗
+                  </button>
+                ) : (
+                  <span style={{ fontSize: 8, color: "#4b5563", fontWeight: 500, flexShrink: 0 }}>No link</span>
+                )}
               </div>
             </div>
           ))}
@@ -489,8 +525,15 @@ function ReportsKnowledgeGraphInner({ manifest, protocolId, pacsAllStudies, onCl
     }
   }, [focusLabel, nodes, reactFlowInstance]);
 
-  // Collect all PACS entries for the "View All PACS" button
+  // Collect all PACS entries (with accession_number) and all radiology entries
   const allPacsEntries = useMemo(() => manifest.filter((e) => e.accession_number), [manifest]);
+  const allRadiologyEntries = useMemo(() => manifest.filter((e) => {
+    const cat = categorize(e.report_type, e.report_type_swc);
+    return cat === "radyoloji";
+  }), [manifest]);
+
+  // Show PACS panel whenever there are PACS entries, radiology entries, or a PACS all-studies link
+  const showPacs = allPacsEntries.length > 0 || allRadiologyEntries.length > 0 || !!pacsAllStudies;
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
@@ -516,9 +559,14 @@ function ReportsKnowledgeGraphInner({ manifest, protocolId, pacsAllStudies, onCl
         />
       </ReactFlow>
 
-      {/* PACS quick access panel */}
-      {allPacsEntries.length > 0 && (
-        <PacsPanel entries={allPacsEntries} pacsAllStudies={pacsAllStudies} onOpenPacs={onOpenPacs} />
+      {/* PACS quick access panel — shows for any radiology/PACS content */}
+      {showPacs && (
+        <PacsPanel
+          entries={allPacsEntries}
+          pacsAllStudies={pacsAllStudies}
+          onOpenPacs={onOpenPacs}
+          allRadiologyEntries={allRadiologyEntries}
+        />
       )}
     </div>
   );
