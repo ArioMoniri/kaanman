@@ -14,6 +14,58 @@ import { CerebraLinkLogo } from "@/components/ui/cerebralink-logo";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100";
 
+/* Resizable sidebar wrapper — drag handle on left edge */
+function ResizableSidebar({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  const [width, setWidth] = useState(420);
+  const isDragging = useRef(false);
+  const startX = useRef(0);
+  const startW = useRef(420);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    isDragging.current = true;
+    startX.current = e.clientX;
+    startW.current = width;
+    e.preventDefault();
+  }, [width]);
+
+  useEffect(() => {
+    function handleMouseMove(e: MouseEvent) {
+      if (!isDragging.current) return;
+      const delta = startX.current - e.clientX;
+      const newWidth = Math.max(280, Math.min(startW.current + delta, window.innerWidth * 0.6));
+      setWidth(newWidth);
+    }
+    function handleMouseUp() {
+      isDragging.current = false;
+    }
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
+
+  return (
+    <div
+      className="fixed top-0 right-0 h-screen z-40 bg-[#131316] flex"
+      style={{ width }}
+    >
+      {/* Drag handle */}
+      <div
+        onMouseDown={handleMouseDown}
+        className="w-1.5 h-full cursor-col-resize hover:bg-accent/30 active:bg-accent/50 transition-colors border-l border-border/30 shrink-0 flex items-center justify-center group"
+      >
+        <div className="w-0.5 h-8 rounded-full bg-gray-600 group-hover:bg-accent/70 transition-colors" />
+      </div>
+      {/* Sidebar content */}
+      <div className="flex-1 min-w-0 h-full">
+        {children}
+      </div>
+    </div>
+  );
+}
+
 interface AgentStatusItem {
   agent: string;
   status: "running" | "done" | "error";
@@ -407,9 +459,11 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Reference Sidebar — fixed to right edge, overlays content */}
+      {/* Reference Sidebar — fixed to right edge, resizable */}
       {showReferences && latestRefMsg && (
-        <div className="fixed top-0 right-0 h-screen w-[min(420px,33vw)] z-40 border-l border-border/30 bg-[#131316]">
+        <ResizableSidebar
+          onClose={() => { setShowReferences(false); setRefUrl(undefined); setRefTitle(undefined); }}
+        >
           <ReferenceSidebar
             citations={latestRefMsg.citations || []}
             guidelines={latestRefMsg.guidelines_used || []}
@@ -417,7 +471,7 @@ export default function Home() {
             initialUrl={refUrl}
             initialTitle={refTitle}
           />
-        </div>
+        </ResizableSidebar>
       )}
 
       {/* Knowledge Graph Modal */}

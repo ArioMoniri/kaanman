@@ -143,7 +143,36 @@ function extractAlerts(text: string): string[] {
     .filter((l) => /⚠️\s*(ALERT|CRITICAL):/i.test(l) || /^CRITICAL:/i.test(l));
 }
 
-/** Animated highlight component with markdown + clickable references */
+/** Render a single highlight item with markdown + LaTeX support */
+function HighlightItem({ text, onOpenReferenceUrl }: { text: string; onOpenReferenceUrl?: (url: string, title: string) => void }) {
+  const hasLatex = text.includes("$$");
+  if (hasLatex) {
+    const parts = text.split(/(\$\$[\s\S]*?\$\$)/g);
+    return (
+      <div className="prose-content">
+        {parts.map((part, i) => {
+          if (part.startsWith("$$") && part.endsWith("$$")) {
+            return <LatexRenderer key={i} content={part} />;
+          }
+          return (
+            <ReactMarkdown key={i} remarkPlugins={[remarkGfm]} components={markdownComponents(onOpenReferenceUrl)}>
+              {part}
+            </ReactMarkdown>
+          );
+        })}
+      </div>
+    );
+  }
+  return (
+    <div className="prose-content">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents(onOpenReferenceUrl)}>
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+/** Animated highlight component with markdown + LaTeX + clickable references */
 function HighlightedContent({ highlights, onOpenReferenceUrl }: { highlights: string[]; onOpenReferenceUrl?: (url: string, title: string) => void }) {
   const [visibleCount, setVisibleCount] = useState(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -185,13 +214,8 @@ function HighlightedContent({ highlights, onOpenReferenceUrl }: { highlights: st
           >
             <div className={`flex gap-2.5 items-start ${isAlert ? "bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2" : ""}`}>
               <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 animate-pulse ${isAlert ? "bg-red-400" : "bg-amber-400"}`} />
-              <div className="text-base text-gray-200 leading-relaxed flex-1 prose-content">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={markdownComponents(onOpenReferenceUrl)}
-                >
-                  {h}
-                </ReactMarkdown>
+              <div className="text-base text-gray-200 leading-relaxed flex-1">
+                <HighlightItem text={h} onOpenReferenceUrl={onOpenReferenceUrl} />
               </div>
             </div>
           </div>
@@ -463,7 +487,9 @@ export function MessageBubble({
           <div className="mx-5 mb-2 space-y-1.5">
             {alerts.map((alert, i) => (
               <div key={i} className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30">
-                <span className="text-red-400 text-lg leading-none shrink-0 mt-0.5">&#9888;</span>
+                <svg className="w-5 h-5 text-red-400 shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                </svg>
                 <div className="text-sm text-red-200 leading-relaxed flex-1 prose-content">
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents(onOpenReferenceUrl)}>
                     {alert.replace(/^⚠️\s*ALERT:\s*/i, "").replace(/^⚠️\s*CRITICAL:\s*/i, "")}
