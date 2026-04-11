@@ -115,13 +115,13 @@ function RingGauge({
           strokeDashoffset={circumference * 0.25}
           style={{ transition: "stroke-dasharray 0.8s ease" }}
         />
-        {/* Score text */}
+        {/* Score text — uses same gradient as the ring arc */}
         <text
           x={cx}
           y={cy + 1}
           textAnchor="middle"
           dominantBaseline="middle"
-          fill={color}
+          fill={`url(#${gradId})`}
           fontSize="13"
           fontWeight="700"
           fontFamily="var(--font-manrope)"

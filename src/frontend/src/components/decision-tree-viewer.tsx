@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   ReactFlow,
   Background,
@@ -76,18 +76,45 @@ function buildFlowEdges(edges: DecisionTreeEdge[]): Edge[] {
 export function DecisionTreeViewer({ title, nodes, edges, onClose }: DecisionTreeViewerProps) {
   const flowNodes = buildFlowNodes(nodes);
   const flowEdges = buildFlowEdges(edges);
-  const backdropRef = useRef<HTMLDivElement>(null);
 
-  const handleBackdropClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.target === backdropRef.current) onClose();
-    },
-    [onClose],
-  );
+  // Resizable width
+  const [width, setWidth] = useState(420);
+  const isDragging = useRef(false);
+  const startX = useRef(0);
+  const startW = useRef(420);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    isDragging.current = true;
+    startX.current = e.clientX;
+    startW.current = width;
+    e.preventDefault();
+  }, [width]);
+
+  useEffect(() => {
+    function handleMouseMove(e: MouseEvent) {
+      if (!isDragging.current) return;
+      const delta = e.clientX - startX.current;
+      const newWidth = Math.max(280, Math.min(startW.current + delta, window.innerWidth * 0.6));
+      setWidth(newWidth);
+    }
+    function handleMouseUp() {
+      isDragging.current = false;
+    }
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
 
   return (
-    <div ref={backdropRef} className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-6" onClick={handleBackdropClick}>
-      <div className="w-full h-full max-w-6xl max-h-[85vh] bg-[#131316] rounded-2xl border border-border/30 flex flex-col overflow-hidden">
+    <div
+      className="fixed top-0 left-0 h-screen z-40 bg-[#131316] flex"
+      style={{ width }}
+    >
+      {/* Panel content */}
+      <div className="flex-1 min-w-0 h-full flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/30">
           <div className="flex items-center gap-2">
@@ -96,7 +123,7 @@ export function DecisionTreeViewer({ title, nodes, edges, onClose }: DecisionTre
           </div>
           <button
             onClick={onClose}
-            className="text-gray-500 hover:text-gray-300 text-lg px-2"
+            className="text-gray-500 hover:text-gray-300 text-lg px-2 py-1 rounded hover:bg-white/5"
           >
             &times;
           </button>
@@ -114,6 +141,14 @@ export function DecisionTreeViewer({ title, nodes, edges, onClose }: DecisionTre
             <Controls />
           </ReactFlow>
         </div>
+      </div>
+
+      {/* Drag handle on right edge */}
+      <div
+        onMouseDown={handleMouseDown}
+        className="w-1.5 h-full cursor-col-resize hover:bg-accent/30 active:bg-accent/50 transition-colors border-r border-border/30 shrink-0 flex items-center justify-center group"
+      >
+        <div className="w-0.5 h-8 rounded-full bg-gray-600 group-hover:bg-accent/70 transition-colors" />
       </div>
     </div>
   );
