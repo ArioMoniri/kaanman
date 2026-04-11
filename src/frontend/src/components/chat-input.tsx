@@ -35,6 +35,9 @@ function useVoiceInput(onTranscript: (text: string) => void) {
   const [interim, setInterim] = useState("");
   const [isSupported, setIsSupported] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  // wantListening: true when user toggled ON, false when user toggled OFF.
+  // Distinguishes intentional stop from Chrome's auto-stop (silence timeout).
+  const wantListeningRef = useRef(false);
 
   // Detect support after hydration (window unavailable during SSR)
   useEffect(() => {
@@ -43,22 +46,33 @@ function useVoiceInput(onTranscript: (text: string) => void) {
     );
   }, []);
 
-  const start = useCallback(() => {
-    if (!isSupported) return;
-
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
+  const createRecognition = useCallback(() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SR();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = ""; // auto-detect
+    // Use browser locale — empty string causes Chrome to error immediately
+    recognition.lang = navigator.language || "en-US";
+    return recognition;
+  }, []);
 
+  const start = useCallback(() => {
+    if (!isSupported || recognitionRef.current) return;
+    wantListeningRef.current = true;
+
+    const recognition = createRecognition();
     let finalTranscript = "";
 
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
+    recognition.addEventListener("start", () => {
+      setIsListening(true);
+    });
+
+    recognition.addEventListener("result", (event) => {
+      const e = event as SpeechRecognitionEvent;
       let interimText = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const transcript = e.results[i][0].transcript;
+        if (e.results[i].isFinal) {
           finalTranscript += transcript + " ";
         } else {
           interimText += transcript;
@@ -69,27 +83,52 @@ function useVoiceInput(onTranscript: (text: string) => void) {
         onTranscript(finalTranscript.trim());
         finalTranscript = "";
       }
-    };
+    });
 
-    recognition.onerror = () => {
+    recognition.addEventListener("error", (event) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const errCode = (event as any).error as string | undefined;
+      // "aborted" = user stopped; "no-speech" = silence timeout — both normal
+      if (errCode === "aborted" || errCode === "no-speech") return;
+      // "not-allowed" = mic permission denied
+      console.warn("[Voice] SpeechRecognition error:", errCode);
+      wantListeningRef.current = false;
+      recognitionRef.current = null;
       setIsListening(false);
       setInterim("");
-    };
+    });
 
-    recognition.onend = () => {
+    recognition.addEventListener("end", () => {
+      // Chrome auto-stops continuous recognition after ~5-10s of silence.
+      // If the user still wants to listen, auto-restart silently.
+      if (wantListeningRef.current) {
+        try {
+          recognition.start();
+          return; // keep isListening true
+        } catch {
+          // If restart fails (e.g., mic revoked), give up
+        }
+      }
+      recognitionRef.current = null;
       setIsListening(false);
       setInterim("");
-    };
+    });
 
     recognitionRef.current = recognition;
-    recognition.start();
-    setIsListening(true);
-  }, [isSupported, onTranscript]);
+    try {
+      recognition.start();
+    } catch {
+      wantListeningRef.current = false;
+      recognitionRef.current = null;
+    }
+  }, [isSupported, onTranscript, createRecognition]);
 
   const stop = useCallback(() => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
+    wantListeningRef.current = false; // signal onend NOT to restart
+    const rec = recognitionRef.current;
+    recognitionRef.current = null;
+    if (rec) {
+      try { rec.stop(); } catch { /* ignore */ }
     }
     setIsListening(false);
     setInterim("");
@@ -106,8 +145,11 @@ function useVoiceInput(onTranscript: (text: string) => void) {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
+      wantListeningRef.current = false;
+      const rec = recognitionRef.current;
+      recognitionRef.current = null;
+      if (rec) {
+        try { rec.stop(); } catch { /* ignore */ }
       }
     };
   }, []);
