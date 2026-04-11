@@ -104,46 +104,74 @@ function extractPatientEntities(data: Record<string, unknown> | null): DeepLinkE
   if (!data) return [];
   const entities: DeepLinkEntity[] = [];
   const seen = new Set<string>();
+  const add = (text: string, category: string, label: string) => {
+    const key = text.toLowerCase();
+    if (!text || text.length < 3 || seen.has(key)) return;
+    seen.add(key);
+    entities.push({ text, category, label });
+  };
 
   const patient = (data.patient as Record<string, unknown>) || data;
   const episodes = (data.episodes as Record<string, unknown>[]) || [];
 
   // Departments
   for (const ep of episodes) {
-    const svc = (ep.service_name as string) || "";
-    if (svc && svc.length > 2 && !seen.has(svc.toLowerCase())) {
-      seen.add(svc.toLowerCase());
-      entities.push({ text: svc, category: "department", label: svc });
-    }
+    add((ep.service_name as string) || "", "department", (ep.service_name as string) || "");
   }
 
-  // Diagnoses
+  // Diagnoses + ICD codes
   for (const ep of episodes) {
     for (const d of ((ep.diagnosis as Record<string, unknown>[]) || [])) {
       const name = (d.DiagnosisName as string) || (d.diagnosis_name as string) || "";
-      if (name && name.length > 3 && !seen.has(name.toLowerCase())) {
-        seen.add(name.toLowerCase());
-        entities.push({ text: name, category: "diagnosis", label: name });
-      }
+      add(name, "diagnosis", name);
+      const icd = (d.ICDCode as string) || (d.icd_code as string) || "";
+      if (icd && icd.length >= 3) add(icd, "icd", name || icd);
     }
   }
 
-  // Medications
-  const recipes = ((patient.previous_recipes as Record<string, unknown>[]) || []);
-  for (const med of recipes) {
+  // Medications from prescription history
+  for (const med of ((patient.previous_recipes as Record<string, unknown>[]) || [])) {
     const name = (med.MedicineName as string) || (med.medicine_name as string) || (med.name as string) || "";
-    if (name && name.length > 3 && !seen.has(name.toLowerCase())) {
-      seen.add(name.toLowerCase());
-      entities.push({ text: name, category: "medication", label: name });
-    }
+    add(name, "medication", name);
   }
 
   // Doctors
   for (const ep of episodes) {
-    const doc = (ep.doctor_name as string) || "";
-    if (doc && doc.length > 3 && !seen.has(doc.toLowerCase())) {
-      seen.add(doc.toLowerCase());
-      entities.push({ text: doc, category: "doctor", label: doc });
+    add((ep.doctor_name as string) || "", "doctor", (ep.doctor_name as string) || "");
+  }
+
+  // Facilities
+  for (const ep of episodes) {
+    const fac = (ep.facility_name as string) || "";
+    if (fac.length > 3) add(fac, "facility", fac);
+  }
+
+  // Visit dates (DD.MM.YYYY or YYYY-MM-DD)
+  for (const ep of episodes) {
+    const dt = (ep.date as string) || "";
+    if (dt && dt.length >= 8) {
+      const svc = (ep.service_name as string) || "Visit";
+      add(dt, "episode", `${dt} | ${svc}`);
+    }
+  }
+
+  // Allergy items
+  const allergy = (patient.allergy || data.allergy) as Record<string, unknown> | undefined;
+  if (allergy && typeof allergy === "object") {
+    for (const [key, val] of Object.entries(allergy)) {
+      if (key === "AllergySwc") continue;
+      const name = String(val);
+      if (name && name.length > 2 && name !== "F" && name !== "T") {
+        add(name, "allergy", "Allergy Alert");
+      }
+    }
+  }
+
+  // Complaints / chief complaints
+  for (const ep of episodes) {
+    for (const c of ((ep.complaint as Record<string, unknown>[]) || [])) {
+      const title = (c.COMPLAINTTITLE as string) || (c.complaint_title as string) || "";
+      if (title.length > 3) add(title, "diagnosis", title);
     }
   }
 

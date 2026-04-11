@@ -82,7 +82,7 @@ export interface Message {
 /** Entity from patient data for deep-linking into the knowledge graph */
 export interface DeepLinkEntity {
   text: string;        // Text to match in answers
-  category: string;    // "diagnosis" | "medication" | "department" | "doctor" | "episode"
+  category: string;    // diagnosis | medication | department | doctor | episode | icd | drug | allergy | facility
   label: string;       // Node label in the knowledge graph
 }
 
@@ -92,6 +92,10 @@ const ENTITY_COLORS: Record<string, { text: string; bg: string; border: string }
   department: { text: "#6ee7b7", bg: "rgba(16,185,129,0.10)", border: "rgba(16,185,129,0.25)" },
   doctor:     { text: "#fcd34d", bg: "rgba(251,191,36,0.10)", border: "rgba(251,191,36,0.25)" },
   episode:    { text: "#d1d5db", bg: "rgba(156,163,175,0.08)", border: "rgba(156,163,175,0.20)" },
+  icd:        { text: "#fdba74", bg: "rgba(251,146,60,0.08)",  border: "rgba(251,146,60,0.20)" },
+  drug:       { text: "#5eead4", bg: "rgba(20,184,166,0.08)",  border: "rgba(20,184,166,0.20)" },
+  allergy:    { text: "#fca5a5", bg: "rgba(252,165,165,0.08)", border: "rgba(252,165,165,0.20)" },
+  facility:   { text: "#67e8f9", bg: "rgba(34,211,238,0.08)",  border: "rgba(34,211,238,0.20)" },
 };
 
 const COUNTRY_LABELS: Record<string, string> = {
@@ -249,11 +253,16 @@ function preprocessInlineRefs(text: string): string {
   return text.replace(/\[(\d+)\]/g, "[`[$1]`](#cite-$1)");
 }
 
+/** Pharmaceutical name suffixes — matches generic drug names with high specificity */
+const DRUG_SUFFIX_RE = /\b([A-Za-z]{4,}(?:mab|zumab|ximab|mumab|nib|tinib|fenib|ciclib|pril|sartan|statin|olol|azole|prazole|conazole|cillin|mycin|cycline|floxacin|dipine|zosin|gliptin|glutide|fenac|profen|triptan|setron|vaptan|lukast|semide|thiazide|sertide|terol|sonide|metasone|olone|nisone))\b/gi;
+
+/** ICD-10 code pattern: Letter + 2 digits, optional .digit(s) */
+const ICD_CODE_RE = /\b([A-TV-Z]\d{2}(?:\.\d{1,2})?)\b/g;
+
 /** Pre-process text: wrap patient entity mentions with deep-link markers.
+ *  Also pattern-detects ICD codes and drug names not in patient data.
  *  Produces Obsidian-style [[links]] as markdown links with #kg- prefix. */
 function preprocessDeepLinks(text: string, entities: DeepLinkEntity[]): string {
-  if (!entities || entities.length === 0) return text;
-
   // 1. Protect LaTeX, code, and existing links from modification
   const placeholders: string[] = [];
   const protect = (m: string) => { placeholders.push(m); return `\x00PH${placeholders.length - 1}\x00`; };
@@ -263,23 +272,41 @@ function preprocessDeepLinks(text: string, entities: DeepLinkEntity[]): string {
   safe = safe.replace(/`[^`]+`/g, protect);                    // inline code
   safe = safe.replace(/\[([^\]]+)\]\([^)]+\)/g, protect);     // markdown links
 
-  // 2. Sort entities longest-first to prevent partial overlap
-  const sorted = [...entities].sort((a, b) => b.text.length - a.text.length);
   const linked = new Set<string>();
 
-  for (const ent of sorted) {
-    if (ent.text.length < 4) continue;
-    const escaped = ent.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp(`\\b(${escaped})\\b`, "gi");
-    safe = safe.replace(re, (match) => {
-      const key = match.toLowerCase();
-      if (linked.has(key)) return match; // already linked first occurrence
-      linked.add(key);
-      return `[${match}](#kg-${encodeURIComponent(ent.category)}-${encodeURIComponent(ent.label)})`;
-    });
+  // 2. Patient-data entities (highest priority — longest-first to prevent partial overlap)
+  if (entities && entities.length > 0) {
+    const sorted = [...entities].sort((a, b) => b.text.length - a.text.length);
+    for (const ent of sorted) {
+      if (ent.text.length < 3) continue;
+      const escaped = ent.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`\\b(${escaped})\\b`, "gi");
+      safe = safe.replace(re, (match) => {
+        const key = match.toLowerCase();
+        if (linked.has(key)) return match;
+        linked.add(key);
+        return `[${match}](#kg-${encodeURIComponent(ent.category)}-${encodeURIComponent(ent.label)})`;
+      });
+    }
   }
 
-  // 3. Restore placeholders
+  // 3. ICD-10 codes (pattern-based — catches codes not in patient data too)
+  safe = safe.replace(ICD_CODE_RE, (match) => {
+    const key = match.toLowerCase();
+    if (linked.has(key)) return match;
+    linked.add(key);
+    return `[${match}](#kg-icd-${encodeURIComponent(match)})`;
+  });
+
+  // 4. Drug names by pharmaceutical suffix (catches drugs not in patient's prescription list)
+  safe = safe.replace(DRUG_SUFFIX_RE, (match) => {
+    const key = match.toLowerCase();
+    if (linked.has(key)) return match;
+    linked.add(key);
+    return `[${match}](#kg-drug-${encodeURIComponent(match)})`;
+  });
+
+  // 5. Restore placeholders
   safe = safe.replace(/\x00PH(\d+)\x00/g, (_, idx) => placeholders[parseInt(idx)]);
   return safe;
 }
@@ -476,22 +503,40 @@ function markdownComponents(
       }
       // Handle knowledge-graph deep links (#kg-category-label)
       const kgMatch = href?.match(/^#kg-([^-]+)-(.+)$/);
-      if (kgMatch && onOpenKgFocus) {
+      if (kgMatch) {
         const category = decodeURIComponent(kgMatch[1]);
         const label = decodeURIComponent(kgMatch[2]);
         const colors = ENTITY_COLORS[category] || ENTITY_COLORS.episode;
+        const tipMap: Record<string, string> = {
+          diagnosis: `Diagnosis: "${label}" — View in Knowledge Graph`,
+          medication: `Patient medication: "${label}" — View in Knowledge Graph`,
+          department: `Department: "${label}" — View in Knowledge Graph`,
+          doctor: `Doctor: "${label}" — View in Knowledge Graph`,
+          episode: `Visit: ${label} — View in Knowledge Graph`,
+          icd: `ICD-10 code: ${label}`,
+          drug: `Drug: ${label}`,
+          allergy: `Allergy: "${label}" — View in Knowledge Graph`,
+          facility: `Facility: "${label}" — View in Knowledge Graph`,
+        };
+        const tip = tipMap[category] || `${label} — View in Knowledge Graph`;
+        const canOpenKg = onOpenKgFocus && !["icd", "drug"].includes(category);
         return (
           <button
-            className="inline-flex items-center gap-0.5 px-1 py-0 rounded text-[inherit] font-inherit transition-all cursor-pointer align-baseline leading-inherit"
+            className="inline-flex items-center gap-0.5 px-0.5 py-0 rounded text-[inherit] font-inherit transition-all align-baseline leading-inherit"
             style={{
               color: colors.text,
               borderBottom: `1.5px dotted ${colors.border}`,
               background: "transparent",
+              cursor: canOpenKg ? "pointer" : "help",
             }}
-            title={`View "${label}" in Knowledge Graph`}
+            title={tip}
             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = colors.bg; }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-            onClick={(e) => { e.preventDefault(); onOpenKgFocus(label); }}
+            onClick={(e) => {
+              e.preventDefault();
+              if (canOpenKg) onOpenKgFocus!(label);
+              else if (onOpenKgFocus) onOpenKgFocus(label);
+            }}
           >
             {children}
           </button>
