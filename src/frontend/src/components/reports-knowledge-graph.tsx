@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import {
   ReactFlow,
   Background,
@@ -105,13 +105,28 @@ function categorize(type: string, swc: string): ReportCategory {
 
 function ReportNode({ data }: { data: GraphNodeData }) {
   const [hovered, setHovered] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const nodeRef = useRef<HTMLDivElement>(null);
   const palette = COLORS[data.category];
   const isCenter = data.category === "center";
 
+  useEffect(() => {
+    if (!pinned) return;
+    const handler = (e: MouseEvent) => {
+      if (nodeRef.current && !nodeRef.current.contains(e.target as globalThis.Node)) {
+        setPinned(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [pinned]);
+
   return (
     <div
+      ref={nodeRef}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onClick={(e) => { e.stopPropagation(); setPinned(!pinned); }}
       style={{
         background: palette.bg,
         border: `1.5px solid ${palette.border}`,
@@ -148,7 +163,7 @@ function ReportNode({ data }: { data: GraphNodeData }) {
         <div style={{ fontSize: 9, opacity: 0.6, marginTop: 2 }}>{data.subtitle}</div>
       )}
 
-      {hovered && data.entries && data.entries.length > 0 && (
+      {(pinned || hovered) && data.entries && data.entries.length > 0 && (
         <div style={{
           position: "absolute" as const, top: "100%", left: "50%",
           transform: "translateX(-50%)", marginTop: 8,
@@ -313,52 +328,7 @@ export function ReportsKnowledgeGraph({ manifest, protocolId, pacsAllStudies, on
   );
 
   return (
-    <div className="fixed inset-0 z-50"
-      style={{ background: "rgba(0,0,0,0.9)", backdropFilter: "blur(6px)" }}>
-      <div style={{
-        position: "absolute", top: 0, left: 0, right: 0, zIndex: 10,
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "12px 20px",
-        background: "linear-gradient(180deg, rgba(13,13,18,0.95), transparent)",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{
-            width: 8, height: 8, borderRadius: "50%",
-            background: "linear-gradient(135deg, #818cf8, #6366f1)",
-            boxShadow: "0 0 12px rgba(129,140,248,0.5)",
-          }} />
-          <h2 style={{ fontSize: 14, fontWeight: 700, color: "#e5e7eb" }}>
-            Reports Knowledge Graph
-          </h2>
-          <span style={{ fontSize: 11, color: "#6b7280" }}>
-            {manifest.length} reports
-            {manifest.some((e) => e.accession_number) && (
-              <> &middot; {manifest.filter((e) => e.accession_number).length} with PACS</>
-            )}
-          </span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {pacsAllStudies && (
-            <button
-              onClick={() => window.open(pacsAllStudies, "_blank", "noopener")}
-              style={{
-                padding: "4px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600,
-                border: "1px solid rgba(96,165,250,0.3)", cursor: "pointer",
-                background: "rgba(96,165,250,0.1)", color: "#93c5fd",
-                transition: "all 0.2s",
-              }}
-              title="Open all radiology studies in PACS viewer (new tab)"
-            >
-              View All PACS
-            </button>
-          )}
-          <button onClick={onClose} style={{
-            color: "#6b7280", fontSize: 18, padding: "4px 10px",
-            borderRadius: 8, border: "none", background: "transparent", cursor: "pointer",
-          }}>&times;</button>
-        </div>
-      </div>
-
+    <div style={{ width: "100%", height: "100%", position: "relative" }}>
       <ReactFlow
         nodes={nodes} edges={edges}
         onNodesChange={onNodesChange}
@@ -383,3 +353,4 @@ export function ReportsKnowledgeGraph({ manifest, protocolId, pacsAllStudies, on
     </div>
   );
 }
+

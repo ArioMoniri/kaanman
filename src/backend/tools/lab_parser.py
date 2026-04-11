@@ -124,8 +124,56 @@ def _extract_historical_dates(header_line: str) -> list[str]:
     return _DATE_PATTERN.findall(header_line)
 
 
+def _is_test_name_line(line: str, raw_line: str) -> bool:
+    """Check if a line is an indented test name (6+ spaces or tab indent)."""
+    if not line:
+        return False
+    indent = len(raw_line) - len(raw_line.lstrip())
+    has_letters = bool(re.search(r"[a-zA-ZçÇğĞıİöÖşŞüÜ]", line))
+    is_numeric = _parse_float(line) is not None
+    # Indented lines containing letters that aren't pure numbers
+    return indent >= 4 and has_letters and not is_numeric
+
+
+def _is_ref_range_line(line: str) -> bool:
+    """Check if a line looks like a reference range (e.g. '4.40 - 9.70')."""
+    return bool(re.match(r"^\s*<?[>]?\s*\d+[.,]?\d*\s*[-–]\s*\d+[.,]?\d*\s*$", line))
+
+
+def _is_unit_line(line: str) -> bool:
+    """Check if a line looks like a unit (%, x10^3/uL, g/dL, etc.)."""
+    unit_patterns = [
+        r"^%$", r"^[a-zA-Z/\^]+$", r"x10\^", r"/[umd]?[Ll]$",
+        r"g/[dm]?L", r"fL$", r"pg$", r"^m[gm]/", r"^U/[Ll]$",
+        r"mIU", r"ng/", r"µ?g/", r"sec$", r"sn$", r"mm/", r"mL$",
+        r"mmol", r"µmol", r"pmol", r"^IU/", r"MEq", r"^Oran$",
+    ]
+    stripped = line.strip()
+    if not stripped:
+        return False
+    for pat in unit_patterns:
+        if re.search(pat, stripped, re.IGNORECASE):
+            return True
+    return False
+
+
+# Lines to skip: noise, method names, sub-section titles
+_SKIP_LINES = {
+    ".", "..", "ODS", "Otomatize Kan Sayım Sistemi",
+    "Tam Kan Sayımı", "Tam İdrar Tetkiki", "Biyokimyasal Testler",
+    "Hormon Testleri", "İmmunolojik Testler", "Koagülasyon Testleri",
+    "Serolojik Testler", "İdrar Biyokimya", "Fonksiyon Testleri",
+    "Kemilüminesans", "İmmüno Nefelometri", "Elektrokemiluminesans",
+    "Türbidimetrik", "Kolorimetrik", "Enzimatik",
+}
+
+
 def parse_lab_report(text: str, report_date: str) -> list[LabValue]:
     """Parse a single lab report TXT file into structured LabValue entries.
+
+    Handles two formats:
+    1. Horizontal (tab/space-separated columns on one line)
+    2. Vertical (Acıbadem format where each field is on its own line)
 
     Args:
         text: Raw text content of the lab report.
@@ -142,63 +190,59 @@ def parse_lab_report(text: str, report_date: str) -> list[LabValue]:
     current_section = "UNKNOWN"
     historical_dates: list[str] = []
 
+    # First try: horizontal parsing (original logic)
+    horizontal_results = _parse_horizontal(lines, report_date)
+    if horizontal_results:
+        return horizontal_results
+
+    # Fallback: vertical parsing for Acıbadem format
+    return _parse_vertical(lines, report_date)
+
+
+def _parse_horizontal(lines: list[str], report_date: str) -> list[LabValue]:
+    """Try parsing as horizontal tab-separated format."""
+    results: list[LabValue] = []
+    current_section = "UNKNOWN"
+    historical_dates: list[str] = []
+
     for line in lines:
         stripped = line.strip()
-        if not stripped:
+        if not stripped or stripped.startswith("#"):
             continue
 
-        # Skip metadata header lines (lines starting with #)
-        if stripped.startswith("#"):
-            continue
-
-        # Check for section header
         section = _is_section_header(stripped)
         if section:
             current_section = section
             continue
 
-        # Check for column header with dates
         if "Sonuç" in stripped or "Referans" in stripped or "Birim" in stripped:
             historical_dates = _extract_historical_dates(stripped)
             continue
 
-        # Skip "Test Adı" row
         if stripped in ("Test Adı", "Test Ad"):
             continue
 
-        # Try to parse a result row
-        # Format: TestName    Value    RefRange    Unit    [hist1]    [hist2]    ...
-        # The line may have leading whitespace and tab/multi-space separators
         parts = re.split(r"\s{2,}|\t", stripped)
         parts = [p.strip() for p in parts if p.strip()]
 
         if len(parts) < 3:
             continue
 
-        # Heuristic: first part is test name, then numeric value, then ref range,
-        # then unit, then optional historical values.
         test_name = parts[0]
-
-        # Skip if test_name looks like a number (sometimes line splits weirdly)
         if _parse_float(test_name) is not None and len(parts) > 4:
             continue
 
         raw_value = parts[1] if len(parts) > 1 else ""
         value = _parse_float(raw_value)
-
-        # Reference range and unit
         ref_str = parts[2] if len(parts) > 2 else ""
         unit = parts[3] if len(parts) > 3 else ""
 
-        # Sometimes ref_range and unit are swapped or merged
         ref_min, ref_max = _parse_ref_range(ref_str)
 
-        # If ref parsing failed and unit looks like a range, swap them
         if ref_min is None and ref_max is None and "-" in unit:
             ref_min, ref_max = _parse_ref_range(unit)
             unit = ref_str if not ref_str.replace(".", "").replace("-", "").replace(" ", "").isdigit() else ""
 
-        # Determine if abnormal
         is_abnormal = False
         if value is not None:
             if ref_min is not None and value < ref_min:
@@ -206,47 +250,183 @@ def parse_lab_report(text: str, report_date: str) -> list[LabValue]:
             if ref_max is not None and value > ref_max:
                 is_abnormal = True
 
-        # Add the current result
         if value is not None or raw_value:
             results.append(LabValue(
-                test_name=test_name,
-                value=value,
-                unit=unit,
-                ref_min=ref_min,
-                ref_max=ref_max,
-                date=report_date,
-                section=current_section,
-                is_abnormal=is_abnormal,
+                test_name=test_name, value=value, unit=unit,
+                ref_min=ref_min, ref_max=ref_max, date=report_date,
+                section=current_section, is_abnormal=is_abnormal,
                 raw_value=raw_value,
             ))
 
-        # Parse historical columns
         hist_values = parts[4:] if len(parts) > 4 else []
         for i, hist_raw in enumerate(hist_values):
             hist_val = _parse_float(hist_raw)
             if hist_val is None:
                 continue
             hist_date = historical_dates[i] if i < len(historical_dates) else f"hist_{i}"
-
             hist_abnormal = False
             if ref_min is not None and hist_val < ref_min:
                 hist_abnormal = True
             if ref_max is not None and hist_val > ref_max:
                 hist_abnormal = True
-
             results.append(LabValue(
-                test_name=test_name,
-                value=hist_val,
-                unit=unit,
-                ref_min=ref_min,
-                ref_max=ref_max,
-                date=hist_date,
-                section=current_section,
-                is_abnormal=hist_abnormal,
+                test_name=test_name, value=hist_val, unit=unit,
+                ref_min=ref_min, ref_max=ref_max, date=hist_date,
+                section=current_section, is_abnormal=hist_abnormal,
                 raw_value=hist_raw,
             ))
 
-    log.debug("Parsed %d lab values from report dated %s", len(results), report_date)
+    log.debug("Horizontal parse: %d values from report dated %s", len(results), report_date)
+    return results
+
+
+def _parse_vertical(lines: list[str], report_date: str) -> list[LabValue]:
+    """Parse vertical format where each field is on its own line.
+
+    Acıbadem lab format:
+          TestName      (indented with 4-6+ spaces)
+    10.34               (value — numeric)
+    4.40 - 9.70         (ref range — X - Y pattern)
+    x10^3/uL            (unit)
+    9.61                (historical values — numeric)
+    """
+    results: list[LabValue] = []
+    current_section = "UNKNOWN"
+    historical_dates: list[str] = []
+    in_header_block = True
+
+    # Collect all lines after header, grouping by test entries
+    i = 0
+    while i < len(lines):
+        raw_line = lines[i]
+        stripped = raw_line.strip()
+        i += 1
+
+        if not stripped:
+            continue
+
+        if stripped.startswith("#") or stripped.startswith("="):
+            continue
+
+        # Detect section headers
+        section = _is_section_header(stripped)
+        if section:
+            current_section = section
+            in_header_block = False
+            continue
+
+        # Collect historical dates from header lines
+        if "Sonuç" in stripped or "Referans" in stripped or "Birim" in stripped:
+            continue
+
+        if stripped in ("Test Adı", "Test Ad"):
+            in_header_block = False
+            continue
+
+        # Collect dates that appear alone on a line in header area
+        date_match = _DATE_PATTERN.match(stripped)
+        if date_match and len(stripped) <= 12:
+            historical_dates.append(stripped)
+            continue
+
+        # Skip noise lines
+        if stripped in _SKIP_LINES or stripped.upper() in _SKIP_LINES:
+            continue
+
+        # Skip hospital header noise (first ~30 lines before first section)
+        if in_header_block and current_section == "UNKNOWN":
+            continue
+
+        # Look for test name (indented line with letters)
+        if _is_test_name_line(stripped, raw_line):
+            test_name = stripped
+            value = None
+            raw_value = ""
+            ref_min = None
+            ref_max = None
+            unit = ""
+            hist_values: list[str] = []
+
+            # Consume subsequent lines for this test entry
+            while i < len(lines):
+                next_raw = lines[i]
+                next_stripped = next_raw.strip()
+
+                if not next_stripped:
+                    i += 1
+                    continue
+
+                # If we hit the next test name, section header, or skip-line, stop
+                if _is_test_name_line(next_stripped, next_raw):
+                    break
+                next_section = _is_section_header(next_stripped)
+                if next_section:
+                    break
+                if next_stripped in _SKIP_LINES or next_stripped.upper() in _SKIP_LINES:
+                    i += 1
+                    continue
+                if next_stripped.startswith("#"):
+                    i += 1
+                    continue
+
+                # Try to classify this line
+                if _is_ref_range_line(next_stripped):
+                    ref_min, ref_max = _parse_ref_range(next_stripped)
+                    i += 1
+                elif _is_unit_line(next_stripped) and not unit:
+                    unit = next_stripped
+                    i += 1
+                elif _parse_float(next_stripped) is not None:
+                    num = _parse_float(next_stripped)
+                    if value is None:
+                        value = num
+                        raw_value = next_stripped
+                    else:
+                        hist_values.append(next_stripped)
+                    i += 1
+                else:
+                    # Unknown line — might be method name or noise, skip
+                    i += 1
+                    # But if it looks like a new test name starting, break
+                    if re.search(r"[a-zA-ZçÇğĞıİöÖşŞüÜ]{3,}", next_stripped):
+                        indent = len(next_raw) - len(next_raw.lstrip())
+                        if indent >= 4:
+                            break
+
+            # Save the parsed test entry
+            if value is not None:
+                is_abnormal = False
+                if ref_min is not None and value < ref_min:
+                    is_abnormal = True
+                if ref_max is not None and value > ref_max:
+                    is_abnormal = True
+
+                results.append(LabValue(
+                    test_name=test_name, value=value, unit=unit,
+                    ref_min=ref_min, ref_max=ref_max, date=report_date,
+                    section=current_section, is_abnormal=is_abnormal,
+                    raw_value=raw_value,
+                ))
+
+                # Historical values
+                for hi, hist_raw in enumerate(hist_values):
+                    hist_val = _parse_float(hist_raw)
+                    if hist_val is None:
+                        continue
+                    hist_date = historical_dates[hi] if hi < len(historical_dates) else f"hist_{hi}"
+                    hist_abnormal = False
+                    if ref_min is not None and hist_val < ref_min:
+                        hist_abnormal = True
+                    if ref_max is not None and hist_val > ref_max:
+                        hist_abnormal = True
+                    results.append(LabValue(
+                        test_name=test_name, value=hist_val, unit=unit,
+                        ref_min=ref_min, ref_max=ref_max, date=hist_date,
+                        section=current_section, is_abnormal=hist_abnormal,
+                        raw_value=hist_raw,
+                    ))
+
+    log.debug("Vertical parse: %d values from report dated %s", len(results), report_date)
     return results
 
 

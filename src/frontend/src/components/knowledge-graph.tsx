@@ -79,6 +79,7 @@ const COLORS: Record<NodeCategory, { bg: string; bgEnd: string; border: string; 
 const DEFAULT_COLOR = { bg: "#1f2937", bgEnd: "#111827", border: "#9ca3af", text: "#e5e7eb", glow: "rgba(156,163,175,0.15)", icon: "📋" };
 
 function GraphNode({ data }: { data: GraphNodeData }) {
+  const [pinned, setPinned] = useState(false);
   const [hovered, setHovered] = useState(false);
   const cat = data.category;
   const palette = COLORS[cat] || DEFAULT_COLOR;
@@ -87,13 +88,28 @@ function GraphNode({ data }: { data: GraphNodeData }) {
 
   const hasDetails = data.detailList && data.detailList.length > 0;
   const hasMeta = data.meta && Object.keys(data.meta).length > 0;
-  const showTooltip = hovered && (hasDetails || hasMeta || data.subtitle);
+  const showTooltip = (pinned || hovered) && (hasDetails || hasMeta || data.subtitle);
+
+  // Close tooltip when clicking outside
+  const nodeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!pinned) return;
+    const handler = (e: MouseEvent) => {
+      if (nodeRef.current && !nodeRef.current.contains(e.target as globalThis.Node)) {
+        setPinned(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [pinned]);
 
   return (
     <div
+      ref={nodeRef}
       style={{ position: "relative", textAlign: "center" }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onClick={(e) => { e.stopPropagation(); setPinned(!pinned); }}
     >
       <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
       <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
@@ -833,6 +849,19 @@ function Legend({ hiddenCategories, onToggleCategory }: {
 
 function StatsBar({ data }: { data: Record<string, unknown> }) {
   const [hoveredStat, setHoveredStat] = useState<string | null>(null);
+  const statsRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!hoveredStat) return;
+    const handler = (e: MouseEvent) => {
+      if (statsRef.current && !statsRef.current.contains(e.target as globalThis.Node)) {
+        setHoveredStat(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [hoveredStat]);
 
   const episodes = (data.episodes as Record<string, unknown>[]) || [];
 
@@ -872,6 +901,7 @@ function StatsBar({ data }: { data: Record<string, unknown> }) {
 
   return (
     <div
+      ref={statsRef}
       style={{
         position: "absolute",
         top: 12,
@@ -898,8 +928,7 @@ function StatsBar({ data }: { data: Record<string, unknown> }) {
             background: hoveredStat === label ? "rgba(255,255,255,0.05)" : "transparent",
             transition: "background 0.2s",
           }}
-          onMouseEnter={() => list.length > 0 && setHoveredStat(label)}
-          onMouseLeave={() => setHoveredStat(null)}
+          onClick={() => list.length > 0 && setHoveredStat(hoveredStat === label ? null : label)}
         >
           <div style={{ fontSize: 18, fontWeight: 800, color, lineHeight: 1.2 }}>{value}</div>
           <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>

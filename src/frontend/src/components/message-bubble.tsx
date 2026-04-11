@@ -358,9 +358,14 @@ function preprocessDeepLinks(text: string, entities: DeepLinkEntity[]): string {
   }
 
   // 4. Lab test names — deep link to trend monitor
+  // Use negative lookbehind/lookahead for Turkish letters to prevent
+  // matching inside Turkish words (e.g., "altında" should not match "ALT")
+  const turkishLetters = "a-zA-ZçÇğĞıİöÖşŞüÜâÂîÎûÛ";
   for (const lt of LAB_TEST_NAMES) {
+    if (lt.length < 3) continue; // Skip very short names to avoid false positives
     const escaped = lt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp(`\\b(${escaped})\\b`, "gi");
+    // Use word boundary but verify no adjacent Turkish letters
+    const re = new RegExp(`(?<![${turkishLetters}])(${escaped})(?![${turkishLetters}])`, "g");
     safe = safe.replace(re, (match) => {
       const key = match.toLowerCase();
       if (linked.has(key)) return match;

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import {
   ReactFlow,
   Background,
@@ -96,20 +96,35 @@ const COLORS: Record<EpCategory, { bg: string; bgEnd: string; border: string; te
 /* ------------------------------------------------------------------ */
 
 function EpGraphNode({ data }: { data: EpNodeData }) {
+  const [pinned, setPinned] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const nodeRef = useRef<HTMLDivElement>(null);
   const cat = data.category;
   const palette = COLORS[cat];
   const isCenter = cat === "patient";
 
   const hasDetails = data.detailList && data.detailList.length > 0;
   const hasMeta = data.meta && Object.keys(data.meta).length > 0;
-  const showTooltip = hovered && (hasDetails || hasMeta || data.subtitle);
+  const showTooltip = (pinned || hovered) && (hasDetails || hasMeta || data.subtitle);
+
+  useEffect(() => {
+    if (!pinned) return;
+    const handler = (e: MouseEvent) => {
+      if (nodeRef.current && !nodeRef.current.contains(e.target as globalThis.Node)) {
+        setPinned(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [pinned]);
 
   return (
     <div
+      ref={nodeRef}
       style={{ position: "relative", textAlign: "center" }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onClick={(e) => { e.stopPropagation(); setPinned(!pinned); }}
     >
       <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
       <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
@@ -551,7 +566,10 @@ function buildEpisodesGraph(
 /*  Legend                                                              */
 /* ------------------------------------------------------------------ */
 
-function EpLegend() {
+function EpLegend({ hiddenCategories, onToggleCategory }: {
+  hiddenCategories: Set<EpCategory>;
+  onToggleCategory: (cat: EpCategory) => void;
+}) {
   const items: { category: EpCategory; label: string }[] = [
     { category: "patient", label: "Timeline" },
     { category: "hospitalization", label: "Yatış" },
@@ -564,16 +582,36 @@ function EpLegend() {
   return (
     <div style={{
       position: "absolute", bottom: 12, left: 12, display: "flex",
-      flexWrap: "wrap", gap: 8, background: "rgba(10,10,14,0.9)",
-      backdropFilter: "blur(12px)", borderRadius: 12, padding: "10px 16px",
-      border: "1px solid rgba(255,255,255,0.08)", zIndex: 10,
+      flexDirection: "column", gap: 4, background: "linear-gradient(180deg, rgba(13,13,18,0.95), rgba(8,8,12,0.95))",
+      backdropFilter: "blur(16px)", borderRadius: 14, padding: "12px 14px",
+      border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+      zIndex: 10,
     }}>
-      {items.map(({ category, label }) => (
-        <div key={category} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ fontSize: 11 }}>{COLORS[category].icon}</span>
-          <span style={{ fontSize: 10, color: COLORS[category].text, fontWeight: 500 }}>{label}</span>
-        </div>
-      ))}
+      <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, marginBottom: 2, paddingLeft: 2 }}>
+        Filter Categories
+      </div>
+      {items.map(({ category, label }) => {
+        const isHidden = hiddenCategories.has(category);
+        return (
+          <button key={category}
+            onClick={() => category !== "patient" && onToggleCategory(category)}
+            style={{
+              display: "flex", alignItems: "center", gap: 8, padding: "5px 8px",
+              borderRadius: 8, border: "none",
+              cursor: category === "patient" ? "default" : "pointer",
+              background: isHidden ? "rgba(255,255,255,0.02)" : `${COLORS[category].border}12`,
+              opacity: isHidden ? 0.4 : 1, transition: "all 0.2s",
+            }}>
+            <div style={{
+              width: 10, height: 10, borderRadius: 3,
+              background: isHidden ? "#333" : COLORS[category].border,
+              border: `1.5px solid ${isHidden ? "#444" : COLORS[category].border}`,
+            }} />
+            <span style={{ fontSize: 11 }}>{COLORS[category].icon}</span>
+            <span style={{ fontSize: 11, color: isHidden ? "#4b5563" : COLORS[category].text, fontWeight: 500 }}>{label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -623,9 +661,33 @@ export function EpisodesKnowledgeGraph({
   onOpenEpisode,
 }: EpisodesKnowledgeGraphProps) {
   const graph = useMemo(() => buildEpisodesGraph(episodes, onOpenEpisode), [episodes, onOpenEpisode]);
+  const [hiddenCategories, setHiddenCategories] = useState<Set<EpCategory>>(new Set());
 
-  const [nodes, setNodes] = useState<Node[]>(graph.nodes);
-  const graphEdges = graph.edges;
+  const toggleCategory = useCallback((cat: EpCategory) => {
+    setHiddenCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
+  }, []);
+
+  const filteredNodes = useMemo(() => {
+    if (hiddenCategories.size === 0) return graph.nodes;
+    return graph.nodes.filter((n) => !hiddenCategories.has((n.data as EpNodeData).category));
+  }, [graph.nodes, hiddenCategories]);
+
+  const filteredNodeIds = useMemo(() => new Set(filteredNodes.map((n) => n.id)), [filteredNodes]);
+  const filteredEdges = useMemo(() => {
+    if (hiddenCategories.size === 0) return graph.edges;
+    return graph.edges.filter((e) => filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target));
+  }, [graph.edges, hiddenCategories, filteredNodeIds]);
+
+  const [nodes, setNodes] = useState<Node[]>(filteredNodes);
+
+  useEffect(() => {
+    setNodes(filteredNodes);
+  }, [filteredNodes]);
 
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
@@ -651,7 +713,7 @@ export function EpisodesKnowledgeGraph({
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
       <ReactFlow
         nodes={nodes}
-        edges={graphEdges}
+        edges={filteredEdges}
         onNodesChange={onNodesChange}
         onNodeClick={handleNodeClick}
         nodeTypes={nodeTypes}
@@ -662,23 +724,24 @@ export function EpisodesKnowledgeGraph({
         minZoom={0.05}
         maxZoom={2.5}
         proOptions={{ hideAttribution: true }}
-        defaultEdgeOptions={{ type: "default", style: { strokeWidth: 1 } }}
+        defaultEdgeOptions={{ type: "smoothstep", style: { strokeWidth: 1.2, strokeOpacity: 0.6 } }}
       >
-        <Background color="#1a1a2e" gap={40} size={1} />
+        <Background color="#1e1e30" gap={32} size={0.6} />
         <Controls style={{ bottom: 12, right: 12, left: "auto" }} />
         <MiniMap
           nodeColor={minimapNodeColor}
-          maskColor="rgba(0,0,0,0.7)"
+          maskColor="rgba(0,0,0,0.65)"
           style={{
-            background: "#0d0d12",
+            background: "rgba(13,13,18,0.9)",
             border: "1px solid rgba(255,255,255,0.06)",
-            borderRadius: 10,
-            height: 100,
-            width: 150,
+            borderRadius: 12,
+            height: 110,
+            width: 160,
+            boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
           }}
         />
       </ReactFlow>
-      <EpLegend />
+      <EpLegend hiddenCategories={hiddenCategories} onToggleCategory={toggleCategory} />
       <EpStatsBar episodes={episodes} />
     </div>
   );
