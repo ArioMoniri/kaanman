@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { TrustGauges } from "./trust-gauges";
@@ -266,32 +266,13 @@ function HighlightItem({ text, onOpenReferenceUrl, citations, onOpenReferences }
   );
 }
 
-/** Animated highlight component with markdown + LaTeX + clickable references */
+/** Highlight component — renders all highlights immediately (no stagger delay) */
 function HighlightedContent({ highlights, onOpenReferenceUrl, citations, onOpenReferences }: {
   highlights: string[];
   onOpenReferenceUrl?: (url: string, title: string) => void;
   citations?: Citation[];
   onOpenReferences?: () => void;
 }) {
-  const [visibleCount, setVisibleCount] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    setVisibleCount(0);
-    let i = 0;
-    function showNext() {
-      i++;
-      setVisibleCount(i);
-      if (i < highlights.length) {
-        timerRef.current = setTimeout(showNext, 150);
-      }
-    }
-    timerRef.current = setTimeout(showNext, 100);
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, [highlights]);
-
   if (highlights.length === 0) {
     return (
       <p className="text-sm text-gray-500 italic">No key highlights detected.</p>
@@ -303,16 +284,9 @@ function HighlightedContent({ highlights, onOpenReferenceUrl, citations, onOpenR
       {highlights.map((h, i) => {
         const isAlert = h.includes("ALERT:") || h.includes("CRITICAL:");
         return (
-          <div
-            key={i}
-            className={`transition-all duration-500 ${
-              i < visibleCount
-                ? "opacity-100 translate-y-0"
-                : "opacity-0 translate-y-2"
-            }`}
-          >
+          <div key={i}>
             <div className={`flex gap-2.5 items-start ${isAlert ? "bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2" : ""}`}>
-              <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 animate-pulse ${isAlert ? "bg-red-400" : "bg-amber-400"}`} />
+              <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${isAlert ? "bg-red-400" : "bg-amber-400"}`} />
               <div className="text-base text-gray-200 leading-relaxed flex-1">
                 <HighlightItem text={h} onOpenReferenceUrl={onOpenReferenceUrl} citations={citations} onOpenReferences={onOpenReferences} />
               </div>
@@ -526,9 +500,10 @@ export function MessageBubble({
       : message.complete_answer!
     : message.content;
 
-  const highlights = hasDualMode
-    ? extractHighlights(message.complete_answer!)
-    : [];
+  const highlights = useMemo(
+    () => (hasDualMode ? extractHighlights(message.complete_answer!) : []),
+    [hasDualMode, message.complete_answer],
+  );
 
   // Extract clinical alert lines from the current display content
   const alerts = extractAlerts(displayContent);

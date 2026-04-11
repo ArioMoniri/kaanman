@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 
 interface Citation {
   index: number;
@@ -31,6 +31,81 @@ interface ReferenceSidebarProps {
 const COUNTRY_LABELS: Record<string, string> = {
   USA: "USA", UK: "UK", Europe: "EU", Turkey: "TR", WHO: "WHO",
 };
+
+/** Embedded browser with iframe load-error detection */
+function EmbeddedBrowser({ url, title, onCopy, onShare, copied }: {
+  url: string; title: string; onCopy: () => void; onShare: () => void; copied: boolean;
+}) {
+  const [loadFailed, setLoadFailed] = useState(false);
+  const iframeRef = React.useRef<HTMLIFrameElement>(null);
+
+  // Reset error state when URL changes
+  useEffect(() => { setLoadFailed(false); }, [url]);
+
+  // Detect iframe load failure via a timeout — if contentWindow is null or
+  // cross-origin after 4s, the site likely blocked framing
+  useEffect(() => {
+    setLoadFailed(false);
+    const timer = setTimeout(() => {
+      try {
+        const iframe = iframeRef.current;
+        if (!iframe) return;
+        // Try to access — will throw for cross-origin blocked frames
+        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+        iframe.contentWindow?.location?.href;
+      } catch {
+        // Cross-origin is normal for working iframes — don't flag
+      }
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [url]);
+
+  const handleIframeError = useCallback(() => { setLoadFailed(true); }, []);
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-surface border-b border-border/20">
+        <span className="text-[10px] text-gray-400 truncate flex-1">{url}</span>
+        <button onClick={onCopy} className="text-[10px] text-gray-500 hover:text-gray-300 shrink-0 px-1.5 py-0.5 rounded border border-border/30 hover:border-border/60 transition-all" title="Copy link">
+          {copied ? "Copied!" : "Copy"}
+        </button>
+        <button onClick={onShare} className="text-[10px] text-gray-500 hover:text-gray-300 shrink-0 px-1.5 py-0.5 rounded border border-border/30 hover:border-border/60 transition-all" title="Share">
+          Share
+        </button>
+        <a href={url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-accent/70 hover:text-accent shrink-0">
+          Open &nearr;
+        </a>
+      </div>
+
+      {loadFailed ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center">
+          <div className="w-12 h-12 rounded-full bg-surface flex items-center justify-center">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-sm text-gray-300 font-medium">This site cannot be embedded</p>
+            <p className="text-xs text-gray-500 mt-1">The website blocked inline preview (X-Frame-Options)</p>
+          </div>
+          <a href={url} target="_blank" rel="noopener noreferrer" className="px-4 py-2 rounded-lg bg-accent/90 hover:bg-accent text-white text-sm font-medium transition-colors">
+            Open in new tab
+          </a>
+        </div>
+      ) : (
+        <iframe
+          ref={iframeRef}
+          src={url}
+          className="flex-1 w-full border-none bg-white"
+          sandbox="allow-scripts allow-same-origin allow-popups"
+          title={title}
+          onError={handleIframeError}
+        />
+      )}
+    </div>
+  );
+}
 
 export function ReferenceSidebar({ citations, guidelines, onClose, initialUrl, initialTitle }: ReferenceSidebarProps) {
   const [activeUrl, setActiveUrl] = useState<string | null>(initialUrl || null);
@@ -147,39 +222,7 @@ export function ReferenceSidebar({ citations, guidelines, onClose, initialUrl, i
       {/* Embedded browser view */}
       <div className="flex-1 min-h-0">
         {activeUrl ? (
-          <div className="flex flex-col h-full">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-surface border-b border-border/20">
-              <span className="text-[10px] text-gray-400 truncate flex-1">{activeUrl}</span>
-              <button
-                onClick={handleCopyLink}
-                className="text-[10px] text-gray-500 hover:text-gray-300 shrink-0 px-1.5 py-0.5 rounded border border-border/30 hover:border-border/60 transition-all"
-                title="Copy link"
-              >
-                {copied ? "Copied!" : "Copy"}
-              </button>
-              <button
-                onClick={handleShare}
-                className="text-[10px] text-gray-500 hover:text-gray-300 shrink-0 px-1.5 py-0.5 rounded border border-border/30 hover:border-border/60 transition-all"
-                title="Share"
-              >
-                Share
-              </button>
-              <a
-                href={activeUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[10px] text-accent/70 hover:text-accent shrink-0"
-              >
-                Open &nearr;
-              </a>
-            </div>
-            <iframe
-              src={activeUrl}
-              className="flex-1 w-full border-none bg-white"
-              sandbox="allow-scripts allow-same-origin allow-popups"
-              title={activeTitle}
-            />
-          </div>
+          <EmbeddedBrowser url={activeUrl} title={activeTitle} onCopy={handleCopyLink} onShare={handleShare} copied={copied} />
         ) : (
           <div className="flex items-center justify-center h-full text-gray-600 text-xs">
             Click a reference to preview

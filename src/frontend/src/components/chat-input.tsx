@@ -33,11 +33,15 @@ TooltipContent.displayName = "TooltipContent";
 function useVoiceInput(onTranscript: (text: string) => void) {
   const [isListening, setIsListening] = useState(false);
   const [interim, setInterim] = useState("");
+  const [isSupported, setIsSupported] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
 
-  const isSupported = typeof window !== "undefined" && (
-    "SpeechRecognition" in window || "webkitSpeechRecognition" in window
-  );
+  // Detect support after hydration (window unavailable during SSR)
+  useEffect(() => {
+    setIsSupported(
+      "SpeechRecognition" in window || "webkitSpeechRecognition" in window
+    );
+  }, []);
 
   const start = useCallback(() => {
     if (!isSupported) return;
