@@ -10,6 +10,7 @@ import { KnowledgeGraph } from "@/components/knowledge-graph";
 import { DecisionTreeViewer } from "@/components/decision-tree-viewer";
 import { ReferenceLegend } from "@/components/reference-legend";
 import { ShimmerText } from "@/components/ui/shimmer-text";
+import { CerebraLinkLogo } from "@/components/ui/cerebralink-logo";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100";
 
@@ -41,6 +42,14 @@ export default function Home() {
   const [showReferences, setShowReferences] = useState(false);
   const [showKnowledgeGraph, setShowKnowledgeGraph] = useState(false);
   const [activeDecisionTree, setActiveDecisionTree] = useState<DecisionTreeData | null>(null);
+  const [refUrl, setRefUrl] = useState<string | undefined>(undefined);
+  const [refTitle, setRefTitle] = useState<string | undefined>(undefined);
+
+  const handleOpenReferenceUrl = useCallback((url: string, title: string) => {
+    setRefUrl(url);
+    setRefTitle(title);
+    setShowReferences(true);
+  }, []);
 
   // Find the latest message with citations/guidelines for the reference sidebar
   const latestRefMsg = [...messages].reverse().find(
@@ -247,9 +256,7 @@ export default function Home() {
         {/* Header */}
         <header className="flex items-center justify-between px-6 py-4 border-b border-border/30">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center text-white font-bold text-sm">
-              C
-            </div>
+            <CerebraLinkLogo size={38} />
             <div>
               <h1 className="text-lg font-semibold text-gray-100">CerebraLink</h1>
               <p className="text-xs text-gray-500">Medical AI Assistant</p>
@@ -281,8 +288,8 @@ export default function Home() {
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-center">
-              <div className="w-16 h-16 rounded-2xl bg-accent/10 flex items-center justify-center mb-4">
-                <span className="text-3xl text-accent">C</span>
+              <div className="mb-4">
+                <CerebraLinkLogo size={80} />
               </div>
               <h2 className="text-xl font-semibold text-gray-200 mb-2">
                 CerebraLink
@@ -302,6 +309,7 @@ export default function Home() {
               onOpenDecisionTree={(tree) => setActiveDecisionTree(tree)}
               onOpenKnowledgeGraph={() => setShowKnowledgeGraph(true)}
               onOpenReferences={() => setShowReferences(true)}
+              onOpenReferenceUrl={handleOpenReferenceUrl}
               hasPatientData={!!patientData}
             />
           ))}
@@ -335,7 +343,9 @@ export default function Home() {
           <ReferenceSidebar
             citations={latestRefMsg.citations || []}
             guidelines={latestRefMsg.guidelines_used || []}
-            onClose={() => setShowReferences(false)}
+            onClose={() => { setShowReferences(false); setRefUrl(undefined); setRefTitle(undefined); }}
+            initialUrl={refUrl}
+            initialTitle={refTitle}
           />
         </div>
       )}

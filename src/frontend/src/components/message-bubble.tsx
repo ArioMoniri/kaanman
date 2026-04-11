@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { TrustGauges } from "./trust-gauges";
 import { RadarChart } from "./radar-chart";
 import { Badge, type BadgeVariant } from "./ui/badge";
@@ -142,11 +142,87 @@ function renderMarkdown(text: string): React.ReactNode[] {
   return elements;
 }
 
+/** Extract key sentences from the complete answer for highlighting */
+function extractHighlights(text: string): string[] {
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  const keywords = [
+    "recommend", "important", "critical", "essential", "warning",
+    "contraindicated", "first-line", "gold standard", "evidence",
+    "strongly", "must", "should not", "avoid", "risk", "significant",
+    "key", "primary", "diagnosis", "treatment", "monitor",
+  ];
+  const scored = sentences.map((s) => {
+    const lower = s.toLowerCase();
+    let score = 0;
+    for (const kw of keywords) {
+      if (lower.includes(kw)) score++;
+    }
+    if (s.startsWith("**")) score += 2;
+    if (lower.includes("$$")) score += 1;
+    return { text: s, score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  return scored.filter((s) => s.score > 0).slice(0, 8).map((s) => s.text);
+}
+
+/** Animated highlight component */
+function HighlightedContent({ highlights }: { highlights: string[] }) {
+  const [visibleCount, setVisibleCount] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setVisibleCount(0);
+    let i = 0;
+    function showNext() {
+      i++;
+      setVisibleCount(i);
+      if (i < highlights.length) {
+        timerRef.current = setTimeout(showNext, 150);
+      }
+    }
+    timerRef.current = setTimeout(showNext, 100);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [highlights]);
+
+  if (highlights.length === 0) {
+    return (
+      <p className="text-sm text-gray-500 italic">No key highlights detected.</p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {highlights.map((h, i) => (
+        <div
+          key={i}
+          className={`transition-all duration-500 ${
+            i < visibleCount
+              ? "opacity-100 translate-y-0"
+              : "opacity-0 translate-y-2"
+          }`}
+        >
+          <div className="flex gap-2 items-start">
+            <span className="mt-1 w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0 animate-pulse" />
+            <span className="text-sm text-gray-200 leading-relaxed">
+              <span className="bg-amber-400/15 px-0.5 rounded">
+                {h.startsWith("**") ? h.slice(2).replace(/\*\*$/, "") : h}
+              </span>
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 interface MessageBubbleProps {
   message: Message;
   onOpenDecisionTree?: (tree: DecisionTreeData) => void;
   onOpenKnowledgeGraph?: () => void;
   onOpenReferences?: () => void;
+  onOpenReferenceUrl?: (url: string, title: string) => void;
   hasPatientData?: boolean;
 }
 
@@ -155,9 +231,10 @@ export function MessageBubble({
   onOpenDecisionTree,
   onOpenKnowledgeGraph,
   onOpenReferences,
+  onOpenReferenceUrl,
   hasPatientData,
 }: MessageBubbleProps) {
-  const [mode, setMode] = useState<"fast" | "complete">("fast");
+  const [mode, setMode] = useState<"fast" | "complete" | "highlight">("fast");
   const [showCitations, setShowCitations] = useState(false);
 
   if (message.role === "user") {
@@ -174,10 +251,15 @@ export function MessageBubble({
   const displayContent = hasDualMode
     ? mode === "fast"
       ? message.fast_answer!
-      : message.complete_answer!
+      : mode === "complete"
+        ? message.complete_answer!
+        : message.complete_answer!
     : message.content;
 
   const hasLatex = displayContent.includes("$$");
+  const highlights = hasDualMode
+    ? extractHighlights(message.complete_answer!)
+    : [];
   const hasCitations = message.citations && message.citations.length > 0;
   const hasGuidelines =
     message.guidelines_used && message.guidelines_used.length > 0;
@@ -224,6 +306,16 @@ export function MessageBubble({
               >
                 Complete
               </button>
+              <button
+                onClick={() => setMode("highlight")}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                  mode === "highlight"
+                    ? "bg-amber-500 text-white"
+                    : "text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                Highlights
+              </button>
             </div>
           ) : (
             <div />
@@ -258,13 +350,19 @@ export function MessageBubble({
         </div>
 
         {/* Answer content */}
-        <div className="text-sm text-gray-200 leading-relaxed whitespace-pre-wrap">
-          {hasLatex ? (
-            <LatexRenderer content={displayContent} />
-          ) : (
-            renderMarkdown(displayContent)
-          )}
-        </div>
+        {mode === "highlight" && hasDualMode ? (
+          <div className="text-sm leading-relaxed">
+            <HighlightedContent highlights={highlights} />
+          </div>
+        ) : (
+          <div className="text-sm text-gray-200 leading-relaxed whitespace-pre-wrap">
+            {hasLatex ? (
+              <LatexRenderer content={displayContent} />
+            ) : (
+              renderMarkdown(displayContent)
+            )}
+          </div>
+        )}
 
         {/* Guidelines as effect-size badges */}
         {hasGuidelines && (
@@ -282,22 +380,33 @@ export function MessageBubble({
                 else if (i < 3) variant = "blue";
                 else variant = "purple-subtle";
 
-                return (
-                  <Badge
-                    key={i}
-                    variant={variant}
-                    size="sm"
-                    href={g.url}
-                    title={g.title}
-                    icon={
-                      <span className="text-[9px] font-bold opacity-70">
-                        {COUNTRY_LABELS[g.country] || g.country}
-                      </span>
+                const handleClick = g.url && onOpenReferenceUrl
+                  ? (e: React.MouseEvent) => {
+                      e.preventDefault();
+                      onOpenReferenceUrl(g.url!, g.title);
                     }
+                  : undefined;
+
+                return (
+                  <div
+                    key={i}
+                    onClick={handleClick}
+                    className={handleClick ? "cursor-pointer" : ""}
                   >
-                    {g.source}
-                    {g.year ? ` (${g.year})` : ""}
-                  </Badge>
+                    <Badge
+                      variant={variant}
+                      size="sm"
+                      title={g.title}
+                      icon={
+                        <span className="text-[9px] font-bold opacity-70">
+                          {COUNTRY_LABELS[g.country] || g.country}
+                        </span>
+                      }
+                    >
+                      {g.source}
+                      {g.year ? ` (${g.year})` : ""}
+                    </Badge>
+                  </div>
                 );
               })}
             </div>
@@ -344,14 +453,18 @@ export function MessageBubble({
                       <div className="min-w-0 flex-1 text-[11px]">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {c.url ? (
-                            <a
-                              href={c.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="font-medium text-accent/80 hover:text-accent underline underline-offset-2"
+                            <button
+                              onClick={() => {
+                                if (onOpenReferenceUrl) {
+                                  onOpenReferenceUrl(c.url!, c.title);
+                                } else {
+                                  window.open(c.url!, "_blank");
+                                }
+                              }}
+                              className="font-medium text-accent/80 hover:text-accent underline underline-offset-2 text-left"
                             >
                               {c.source}
-                            </a>
+                            </button>
                           ) : (
                             <span className="font-medium text-gray-300">
                               {c.source}

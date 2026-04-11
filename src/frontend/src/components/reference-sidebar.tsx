@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 interface Citation {
   index: number;
@@ -24,15 +24,58 @@ interface ReferenceSidebarProps {
   citations: Citation[];
   guidelines: Guideline[];
   onClose: () => void;
+  initialUrl?: string;
+  initialTitle?: string;
 }
 
 const COUNTRY_LABELS: Record<string, string> = {
   USA: "USA", UK: "UK", Europe: "EU", Turkey: "TR", WHO: "WHO",
 };
 
-export function ReferenceSidebar({ citations, guidelines, onClose }: ReferenceSidebarProps) {
-  const [activeUrl, setActiveUrl] = useState<string | null>(null);
-  const [activeTitle, setActiveTitle] = useState("");
+export function ReferenceSidebar({ citations, guidelines, onClose, initialUrl, initialTitle }: ReferenceSidebarProps) {
+  const [activeUrl, setActiveUrl] = useState<string | null>(initialUrl || null);
+  const [activeTitle, setActiveTitle] = useState(initialTitle || "");
+  const [copied, setCopied] = useState(false);
+
+  // Sync with external URL requests
+  useEffect(() => {
+    if (initialUrl) {
+      setActiveUrl(initialUrl);
+      setActiveTitle(initialTitle || "");
+    }
+  }, [initialUrl, initialTitle]);
+
+  const handleCopyLink = async () => {
+    if (!activeUrl) return;
+    try {
+      await navigator.clipboard.writeText(activeUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // fallback
+      const input = document.createElement("input");
+      input.value = activeUrl;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      document.body.removeChild(input);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleShare = async () => {
+    if (!activeUrl) return;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: activeTitle, url: activeUrl });
+      } catch {
+        // user cancelled
+      }
+    } else {
+      handleCopyLink();
+    }
+  };
 
   // Collect all unique URLs
   const allRefs = [
@@ -105,8 +148,22 @@ export function ReferenceSidebar({ citations, guidelines, onClose }: ReferenceSi
       <div className="flex-1 min-h-0">
         {activeUrl ? (
           <div className="flex flex-col h-full">
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-surface border-b border-border/20">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-surface border-b border-border/20">
               <span className="text-[10px] text-gray-400 truncate flex-1">{activeUrl}</span>
+              <button
+                onClick={handleCopyLink}
+                className="text-[10px] text-gray-500 hover:text-gray-300 shrink-0 px-1.5 py-0.5 rounded border border-border/30 hover:border-border/60 transition-all"
+                title="Copy link"
+              >
+                {copied ? "Copied!" : "Copy"}
+              </button>
+              <button
+                onClick={handleShare}
+                className="text-[10px] text-gray-500 hover:text-gray-300 shrink-0 px-1.5 py-0.5 rounded border border-border/30 hover:border-border/60 transition-all"
+                title="Share"
+              >
+                Share
+              </button>
               <a
                 href={activeUrl}
                 target="_blank"
