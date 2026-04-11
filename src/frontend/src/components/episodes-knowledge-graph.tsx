@@ -714,7 +714,7 @@ function EpisodesKnowledgeGraphInner({
     [onOpenEpisode],
   );
 
-  // Auto-zoom to focused node (from deep links)
+  // Auto-zoom to focused node (from deep links) — zoom inside canvas
   useEffect(() => {
     if (!focusLabel || !reactFlowInstance) return;
     const target = focusLabel.toLowerCase();
@@ -726,12 +726,12 @@ function EpisodesKnowledgeGraphInner({
     });
     if (focusedNode) {
       setTimeout(() => {
-        reactFlowInstance.fitView({
-          nodes: [{ id: focusedNode.id }],
-          duration: 800,
-          padding: 3,
-        });
-      }, 400);
+        reactFlowInstance.setCenter(
+          focusedNode.position.x + 60,
+          focusedNode.position.y + 20,
+          { zoom: 1.5, duration: 800 },
+        );
+      }, 500);
     }
   }, [focusLabel, nodes, reactFlowInstance]);
 

@@ -64,6 +64,7 @@ interface GraphNodeData {
   count?: number;
   pacsCount?: number;
   entries?: ManifestEntry[];
+  onOpenReport?: (entry: ManifestEntry) => void;
   [key: string]: unknown;
 }
 
@@ -172,22 +173,34 @@ function ReportNode({ data }: { data: GraphNodeData }) {
           transform: "translateX(-50%)", marginTop: 8,
           background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.1)",
           borderRadius: 8, padding: "8px 12px", fontSize: 10, color: "#d1d5db",
-          minWidth: 200, maxWidth: 300, maxHeight: 200, overflow: "auto",
+          minWidth: 220, maxWidth: 340, maxHeight: 260, overflow: "auto",
           zIndex: 100, boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
         }}>
-          {data.entries.slice(0, 10).map((e, i) => (
-            <div key={i} style={{ padding: "2px 0", borderBottom: i < 9 ? "1px solid rgba(255,255,255,0.04)" : "none" }}>
-              <div style={{ fontWeight: 600, color: palette.text }}>
-                {e.report_name}
+          <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 4, fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: 4 }}>
+            {data.entries.length} reports — click to view
+          </div>
+          {data.entries.slice(0, 15).map((e, i) => (
+            <div key={i}
+              onClick={(ev) => { ev.stopPropagation(); if (data.onOpenReport) data.onOpenReport(e); }}
+              style={{
+                padding: "4px 6px", borderBottom: i < 14 ? "1px solid rgba(255,255,255,0.04)" : "none",
+                cursor: "pointer", borderRadius: 4, transition: "background 0.15s",
+              }}
+              onMouseEnter={(ev) => { (ev.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.06)"; }}
+              onMouseLeave={(ev) => { (ev.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+            >
+              <div style={{ fontWeight: 600, color: palette.text, display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.report_name}</span>
                 {e.accession_number && (
-                  <span style={{ marginLeft: 4, fontSize: 8, color: "#60a5fa", fontWeight: 400 }} title="PACS available">PACS</span>
+                  <span style={{ fontSize: 8, color: "#60a5fa", fontWeight: 400, background: "rgba(96,165,250,0.1)", padding: "1px 4px", borderRadius: 3, flexShrink: 0 }}>PACS</span>
                 )}
+                <span style={{ fontSize: 9, color: "#818cf8", flexShrink: 0 }}>&rarr;</span>
               </div>
-              <div style={{ color: "#6b7280" }}>{e.date} &middot; {e.facility}</div>
+              <div style={{ color: "#6b7280", fontSize: 9 }}>{e.date} &middot; {e.facility}</div>
             </div>
           ))}
-          {data.entries.length > 10 && (
-            <div style={{ color: "#6b7280", marginTop: 4 }}>+{data.entries.length - 10} more...</div>
+          {data.entries.length > 15 && (
+            <div style={{ color: "#6b7280", marginTop: 4, fontSize: 9 }}>+{data.entries.length - 15} more...</div>
           )}
         </div>
       )}
@@ -201,7 +214,7 @@ const nodeTypes = { reportNode: ReportNode };
 /*  Build graph from manifest                                          */
 /* ------------------------------------------------------------------ */
 
-function buildGraph(manifest: ManifestEntry[]): { nodes: Node<GraphNodeData>[]; edges: Edge[] } {
+function buildGraph(manifest: ManifestEntry[], onOpenReport?: (entry: ManifestEntry) => void): { nodes: Node<GraphNodeData>[]; edges: Edge[] } {
   const groups: Record<string, ManifestEntry[]> = {};
   for (const entry of manifest) {
     const cat = categorize(entry.report_type, entry.report_type_swc);
@@ -249,6 +262,7 @@ function buildGraph(manifest: ManifestEntry[]): { nodes: Node<GraphNodeData>[]; 
         count: entries.length,
         pacsCount: pacsCount || undefined,
         entries,
+        onOpenReport,
       },
     });
 
@@ -290,6 +304,7 @@ function buildGraph(manifest: ManifestEntry[]): { nodes: Node<GraphNodeData>[]; 
               count: groupEntries.length,
               pacsCount: subPacs || undefined,
               entries: groupEntries,
+              onOpenReport,
             },
           });
 
@@ -312,7 +327,7 @@ function buildGraph(manifest: ManifestEntry[]): { nodes: Node<GraphNodeData>[]; 
 /* ------------------------------------------------------------------ */
 
 function ReportsKnowledgeGraphInner({ manifest, protocolId, pacsAllStudies, onClose, onOpenReport, onOpenPacs, focusLabel }: ReportsKnowledgeGraphProps) {
-  const { nodes: initialNodes, edges } = useMemo(() => buildGraph(manifest), [manifest]);
+  const { nodes: initialNodes, edges } = useMemo(() => buildGraph(manifest, onOpenReport), [manifest, onOpenReport]);
   const [nodes, setNodes] = useState(initialNodes);
   const reactFlowInstance = useReactFlow();
 
@@ -331,7 +346,7 @@ function ReportsKnowledgeGraphInner({ manifest, protocolId, pacsAllStudies, onCl
     [onOpenReport],
   );
 
-  // Auto-zoom to focused node (from deep links)
+  // Auto-zoom to focused node (from deep links) — zoom inside canvas, not the whole popup
   useEffect(() => {
     if (!focusLabel || !reactFlowInstance) return;
     const target = focusLabel.toLowerCase();
@@ -341,13 +356,14 @@ function ReportsKnowledgeGraphInner({ manifest, protocolId, pacsAllStudies, onCl
         (d.entries && d.entries.some(e => e.report_type.toLowerCase().includes(target) || e.report_name.toLowerCase().includes(target)));
     });
     if (focusedNode) {
+      // First fit all, then zoom to the focused node within the canvas
       setTimeout(() => {
-        reactFlowInstance.fitView({
-          nodes: [{ id: focusedNode.id }],
-          duration: 800,
-          padding: 3,
-        });
-      }, 400);
+        reactFlowInstance.setCenter(
+          focusedNode.position.x + 60,
+          focusedNode.position.y + 20,
+          { zoom: 1.5, duration: 800 },
+        );
+      }, 500);
     }
   }, [focusLabel, nodes, reactFlowInstance]);
 

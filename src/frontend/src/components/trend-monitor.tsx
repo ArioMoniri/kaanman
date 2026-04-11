@@ -17,6 +17,7 @@ interface TrendMonitorProps {
   protocolId: string;
   trends: Record<string, LabPoint[]>;
   onClose: () => void;
+  focusTestName?: string;
 }
 
 /** SVG sparkline for a single lab test */
@@ -93,11 +94,30 @@ const SECTIONS = [
   "IMMUNOLOJI", "KOAGULASYON", "SEROLOJI", "IDRAR TAHLILI",
 ];
 
-export function TrendMonitor({ protocolId, trends, onClose }: TrendMonitorProps) {
+export function TrendMonitor({ protocolId, trends, onClose, focusTestName }: TrendMonitorProps) {
   const [search, setSearch] = useState("");
   const [section, setSection] = useState("ALL");
   const [showAbnormalOnly, setShowAbnormalOnly] = useState(false);
   const [expandedTest, setExpandedTest] = useState<string | null>(null);
+  const focusRef = React.useRef<HTMLDivElement>(null);
+
+  // Auto-focus on a specific test when opened from a deep link
+  React.useEffect(() => {
+    if (!focusTestName) return;
+    // Find the matching test (case-insensitive partial match)
+    const target = focusTestName.toLowerCase();
+    const match = Object.keys(trends).find(k =>
+      k.toLowerCase().includes(target) || target.includes(k.toLowerCase())
+    );
+    if (match) {
+      setExpandedTest(match);
+      setSearch(match);
+      // Scroll to the test after render
+      setTimeout(() => {
+        focusRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 200);
+    }
+  }, [focusTestName, trends]);
 
   const testNames = useMemo(() => Object.keys(trends).filter((k) => !k.startsWith("_")), [trends]);
 
@@ -196,11 +216,13 @@ export function TrendMonitor({ protocolId, trends, onClose }: TrendMonitorProps)
             const isAbnormal = latest?.is_abnormal || false;
 
             return (
-              <div key={testName} onClick={() => setExpandedTest(isExpanded ? null : testName)}
+              <div key={testName}
+                ref={isExpanded && expandedTest === testName ? focusRef : undefined}
+                onClick={() => setExpandedTest(isExpanded ? null : testName)}
                 style={{
                   padding: "10px 12px", marginBottom: 4, borderRadius: 8, cursor: "pointer",
                   background: isExpanded ? "rgba(255,255,255,0.04)" : "transparent",
-                  border: `1px solid ${isAbnormal ? "rgba(239,68,68,0.15)" : "rgba(255,255,255,0.03)"}`,
+                  border: `1px solid ${isAbnormal ? "rgba(239,68,68,0.15)" : isExpanded ? "rgba(129,140,248,0.3)" : "rgba(255,255,255,0.03)"}`,
                   transition: "all 0.15s",
                 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>

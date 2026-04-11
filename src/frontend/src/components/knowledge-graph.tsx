@@ -1311,7 +1311,7 @@ export function KnowledgeGraph({
                   style: { strokeWidth: 1.2, strokeOpacity: 0.6 },
                 }}
                 onInit={(instance) => {
-                  // Auto-zoom to focused node after initial layout
+                  // Auto-zoom to focused node after initial layout — inside canvas only
                   if (focusLabel) {
                     const target = focusLabel.toLowerCase();
                     const focusedNode = nodes.find((n) => {
@@ -1321,12 +1321,12 @@ export function KnowledgeGraph({
                     });
                     if (focusedNode) {
                       setTimeout(() => {
-                        instance.fitView({
-                          nodes: [{ id: focusedNode.id }],
-                          duration: 800,
-                          padding: 3,
-                        });
-                      }, 300);
+                        instance.setCenter(
+                          focusedNode.position.x + 60,
+                          focusedNode.position.y + 20,
+                          { zoom: 1.5, duration: 800 },
+                        );
+                      }, 400);
                     }
                   }
                 }}

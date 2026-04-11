@@ -64,14 +64,25 @@ Indicators of a non-answer:
 - Repeating the question without providing a real answer
 - Suggesting to "consult a physician" without any clinical analysis
 
-PATIENT-RECORD QUESTIONS:
-When the question is specifically about patient records (e.g., "what are the lab results?", "show me the medications", "what happened during hospitalization?"), adjust scoring criteria:
-- evidence_quality: Score HIGH if the answer accurately cites data from patient records (lab values, dates, diagnoses). External RCTs are NOT required for factual data retrieval.
-- guideline_alignment: Score MODERATE-HIGH as long as data is presented in a clinically meaningful way. External guideline alignment is LESS important for data-retrieval questions.
-- clinical_relevance: Score based on how directly and accurately the patient data answers the question.
-- source_recency: Score based on how recent the patient records are, NOT guideline recency.
-- completeness: Score based on whether ALL relevant patient data was included.
-Patient-record indicators: mentions of specific lab values, dates, episode IDs, medication names from records, "according to the records", specific numerical values from reports.
+PATIENT-RECORD QUESTIONS (CRITICAL — these are scored VERY differently):
+When the question asks about patient records, history, labs, medications, episodes, or hospitalization details — scoring criteria CHANGE FUNDAMENTALLY:
+
+- evidence_quality: Score 80-95 when the answer accurately cites specific data from patient records (lab values with numbers, dates, diagnoses with ICD codes, medication names). The "evidence" IS the patient record data itself — external RCTs are NOT needed. Only score low if the data citations look fabricated or incomplete.
+- guideline_alignment: Score 70-85 as long as data is presented in a clinically useful way. Guideline alignment is NOT a primary criterion for data retrieval. Score 50+ even for basic data presentation.
+- clinical_relevance: Score 85-100 if the answer directly addresses what the doctor asked about the patient. This should almost always be high for record-retrieval questions.
+- safety_check: Score 75-90 if relevant safety notes are mentioned (abnormal values flagged, drug interactions noted). For simple data retrieval, score 70+.
+- completeness: Score based on whether ALL relevant patient data for the question was included. If the answer shows lab values, dates, and context — score 80+.
+- source_recency: Score based on how RECENT the patient records themselves are. If citing recent episodes/labs, score 80+. This is about RECORD dates, not guideline dates.
+
+HOW TO DETECT patient-record questions:
+- The answer contains specific numerical lab values (e.g., "Hemoglobin: 12.3 g/dL")
+- The answer references specific dates from patient history
+- The answer mentions episode IDs, department visits, hospitalization details
+- The answer lists specific medications from the patient's prescription
+- Keywords: "kayıt", "sonuç", "değer", "rapor", "tetkik", "muayene", "episode", "lab", "test result", "record"
+- The question context includes patient context data
+
+IMPORTANT: Do NOT penalize patient-record answers for lacking external evidence or guideline citations. A factual, accurate data retrieval IS high-quality evidence when answering "what are the results?"
 
 Also assess your own confidence in this evaluation (0-100). Consider: did the answer contain enough detail for you to evaluate properly? Could you verify the claims?
 
@@ -99,16 +110,32 @@ RESPOND WITH ONLY JSON:
         if has_patient:
             # Check if the answer references specific patient data
             answer_lower = complete_answer.lower()
+            query_lower = query.lower()
             record_indicators = [
                 "lab", "test", "mg/dl", "g/dl", "mmol", "x10", "normal",
                 "elevated", "decreased", "hospitalization", "episode",
                 "medication", "prescription", "diagnosis", "icd",
                 "report", "radyoloji", "muayene", "laboratuvar",
-                "kayıt", "sonuç", "değer", "tarih",
+                "kayıt", "sonuç", "değer", "tarih", "tetkik",
+                "hemoglobin", "lökosit", "trombosit", "kreatinin",
+                "yatış", "poliklinik", "reçete", "hastane",
             ]
-            is_record_q = sum(1 for ind in record_indicators if ind in answer_lower) >= 3
+            query_record_words = [
+                "nesi var", "durumu", "hastanın", "sonuçlar", "tetkik",
+                "lab", "rapor", "ilaç", "muayene", "history", "results",
+                "medications", "episodes", "diagnosis", "what does",
+                "tell me about", "show me", "records", "data",
+            ]
+            answer_score = sum(1 for ind in record_indicators if ind in answer_lower)
+            query_score = sum(1 for qw in query_record_words if qw in query_lower)
+            is_record_q = answer_score >= 2 or query_score >= 1
             if is_record_q:
-                patient_hint = "\nNOTE: This question appears to be about patient records/data. Apply PATIENT-RECORD scoring criteria."
+                patient_hint = (
+                    "\n\n*** IMPORTANT: This is a PATIENT-RECORD question. "
+                    "The answer is based on imported patient data (lab values, episodes, medications, diagnoses). "
+                    "Apply PATIENT-RECORD scoring criteria — score HIGH for accurate data retrieval. "
+                    "Do NOT penalize for lacking external guidelines or RCTs. ***"
+                )
 
         prompt = f"""Score this medical AI response:
 

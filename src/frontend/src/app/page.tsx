@@ -360,8 +360,10 @@ export default function Home() {
     [],
   );
 
+  const [trendFocusTest, setTrendFocusTest] = useState<string | undefined>(undefined);
+
   const handleOpenTrend = useCallback(
-    async (_testName?: string) => {
+    async (testName?: string) => {
       // Extract protocol ID from patient data
       const pid =
         (patientData as Record<string, unknown>)?.protocol_no as string ||
@@ -369,6 +371,8 @@ export default function Home() {
         ((patientData as Record<string, unknown>)?.patient as Record<string, unknown>)?.patient_id as string ||
         "";
       if (!pid) return;
+      // Set focus test for auto-scroll
+      setTrendFocusTest(testName);
       // If we already have trends cached, just show the monitor
       if (reportTrends) {
         setShowTrendMonitor(true);
@@ -1038,7 +1042,8 @@ export default function Home() {
             ""
           }
           trends={reportTrends as Record<string, never[]>}
-          onClose={() => setShowTrendMonitor(false)}
+          onClose={() => { setShowTrendMonitor(false); setTrendFocusTest(undefined); }}
+          focusTestName={trendFocusTest}
         />
       )}
 
