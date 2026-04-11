@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback, useRef } from "react";
+import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import {
   ReactFlow,
   Background,
@@ -14,6 +14,10 @@ import {
   Handle,
   Position,
 } from "@xyflow/react";
+import { ReportsKnowledgeGraph, type ManifestEntry } from "./reports-knowledge-graph";
+import { EpisodesKnowledgeGraph, type EpisodeEntry } from "./episodes-knowledge-graph";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -23,6 +27,13 @@ interface KnowledgeGraphProps {
   patientData: Record<string, unknown>;
   onClose: () => void;
   focusLabel?: string;
+  reportManifest?: ManifestEntry[];
+  protocolId?: string;
+  pacsAllStudies?: string;
+  onOpenReport?: (entry: ManifestEntry) => void;
+  onOpenTrend?: (testName: string) => void;
+  episodeManifest?: EpisodeEntry[];
+  onOpenEpisode?: (entry: EpisodeEntry) => void;
 }
 
 type NodeCategory =
@@ -927,8 +938,70 @@ function StatsBar({ data }: { data: Record<string, unknown> }) {
 /*  Main component                                                     */
 /* ------------------------------------------------------------------ */
 
-export function KnowledgeGraph({ patientData, onClose, focusLabel }: KnowledgeGraphProps) {
-  const initialGraph = useMemo(() => buildGraph(patientData), [patientData]);
+export function KnowledgeGraph({
+  patientData,
+  onClose,
+  focusLabel,
+  reportManifest,
+  protocolId,
+  pacsAllStudies,
+  onOpenReport,
+  onOpenTrend,
+  episodeManifest,
+  onOpenEpisode,
+}: KnowledgeGraphProps) {
+  const hasReports = reportManifest && reportManifest.length > 0;
+  const hasEpisodes = episodeManifest && episodeManifest.length > 0;
+  const [activeTab, setActiveTab] = useState<"patient" | "reports" | "episodes">("patient");
+  const [graphSource, setGraphSource] = useState<"local" | "neo4j">("local");
+  const inlineGraph = useMemo(() => buildGraph(patientData), [patientData]);
+
+  // Neo4j graph data (fetched async, falls back to inline)
+  const [neo4jGraph, setNeo4jGraph] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
+
+  useEffect(() => {
+    if (!protocolId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await fetch(`${API_URL}/api/graph/${protocolId}/patient`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (cancelled) return;
+        if (data.source === "neo4j" && data.nodes && data.nodes.length > 0) {
+          // Convert Neo4j positions + ensure draggable
+          const apiNodes: Node[] = data.nodes.map((n: Record<string, unknown>) => ({
+            ...n,
+            position: (n.position as { x: number; y: number }) || { x: 0, y: 0 },
+            draggable: true,
+          }));
+          const apiEdges: Edge[] = (data.edges || []).map((e: Record<string, unknown>) => {
+            const category = (e.label as string) || "";
+            const colorKey = category.includes("DIAGNOSIS") ? "diagnosis"
+              : category.includes("EPISODE") ? "episode"
+              : category.includes("REPORT") ? "report"
+              : category.includes("FACILITY") ? "facility"
+              : category.includes("DOCTOR") ? "doctor"
+              : category.includes("MEDICATION") || category.includes("PRESCRIBED") ? "medication"
+              : category.includes("ALLERGY") ? "allergy"
+              : "department";
+            const color = COLORS[colorKey as NodeCategory]?.border || "#6b7280";
+            return {
+              ...e,
+              style: { stroke: color, strokeWidth: 1 },
+            };
+          });
+          setNeo4jGraph({ nodes: apiNodes, edges: apiEdges });
+          setGraphSource("neo4j");
+        }
+      } catch {
+        // Neo4j unavailable — silently use inline graph
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [protocolId]);
+
+  const initialGraph = neo4jGraph || inlineGraph;
 
   // If focusLabel is provided, mark the matching node(s) as focused
   const nodesWithFocus = useMemo(() => {
@@ -948,6 +1021,11 @@ export function KnowledgeGraph({ patientData, onClose, focusLabel }: KnowledgeGr
 
   const [nodes, setNodes] = useState<Node[]>(nodesWithFocus);
   const edges = initialGraph.edges;
+
+  // Update nodes when graph source changes
+  useEffect(() => {
+    setNodes(nodesWithFocus);
+  }, [nodesWithFocus]);
   const backdropRef = useRef<HTMLDivElement>(null);
 
   const onNodesChange: OnNodesChange = useCallback(
@@ -1015,12 +1093,82 @@ export function KnowledgeGraph({ patientData, onClose, focusLabel }: KnowledgeGr
                 animation: "pulse 2s infinite",
               }}
             />
-            <h2 style={{ fontSize: 14, fontWeight: 700, color: "#e5e7eb", letterSpacing: 0.3 }}>
-              Patient Knowledge Graph
-            </h2>
+            {/* Tab switcher */}
+            <div style={{ display: "flex", gap: 2, padding: 2, background: "rgba(255,255,255,0.04)", borderRadius: 8 }}>
+              <button
+                onClick={() => setActiveTab("patient")}
+                style={{
+                  padding: "4px 14px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: "none",
+                  cursor: "pointer",
+                  background: activeTab === "patient" ? "rgba(129,140,248,0.2)" : "transparent",
+                  color: activeTab === "patient" ? "#e0e7ff" : "#6b7280",
+                  transition: "all 0.2s",
+                }}
+              >
+                Patient Data
+              </button>
+              {hasReports && (
+                <button
+                  onClick={() => setActiveTab("reports")}
+                  style={{
+                    padding: "4px 14px",
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    border: "none",
+                    cursor: "pointer",
+                    background: activeTab === "reports" ? "rgba(129,140,248,0.2)" : "transparent",
+                    color: activeTab === "reports" ? "#e0e7ff" : "#6b7280",
+                    transition: "all 0.2s",
+                  }}
+                >
+                  Reports
+                </button>
+              )}
+              {hasEpisodes && (
+                <button
+                  onClick={() => setActiveTab("episodes")}
+                  style={{
+                    padding: "4px 14px",
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    border: "none",
+                    cursor: "pointer",
+                    background: activeTab === "episodes" ? "rgba(248,113,113,0.2)" : "transparent",
+                    color: activeTab === "episodes" ? "#fecaca" : "#6b7280",
+                    transition: "all 0.2s",
+                  }}
+                >
+                  Episodes
+                </button>
+              )}
+            </div>
             <span style={{ fontSize: 11, color: "#6b7280", marginLeft: 4 }}>
-              {nodes.length} nodes &middot; {edges.length} relationships
+              {activeTab === "patient"
+                ? `${nodes.length} nodes \u00B7 ${edges.length} relationships`
+                : activeTab === "reports"
+                  ? `${reportManifest?.length || 0} reports`
+                  : `${episodeManifest?.length || 0} episodes`}
             </span>
+            {activeTab === "patient" && graphSource === "neo4j" && (
+              <span style={{
+                fontSize: 9,
+                color: "#34d399",
+                background: "rgba(52,211,153,0.1)",
+                border: "1px solid rgba(52,211,153,0.25)",
+                padding: "2px 8px",
+                borderRadius: 6,
+                fontWeight: 600,
+                marginLeft: 6,
+              }}>
+                Neo4j
+              </span>
+            )}
           </div>
           <button
             onClick={onClose}
@@ -1050,65 +1198,84 @@ export function KnowledgeGraph({ patientData, onClose, focusLabel }: KnowledgeGr
 
         {/* Graph */}
         <div style={{ flex: 1, position: "relative" }}>
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            nodeTypes={nodeTypes}
-            nodesDraggable
-            fitView
-            fitViewOptions={{ padding: 0.15 }}
-            colorMode="dark"
-            minZoom={0.05}
-            maxZoom={2.5}
-            proOptions={{ hideAttribution: true }}
-            defaultEdgeOptions={{
-              type: "default",
-              style: { strokeWidth: 1 },
-            }}
-            onInit={(instance) => {
-              // Auto-zoom to focused node after initial layout
-              if (focusLabel) {
-                const target = focusLabel.toLowerCase();
-                const focusedNode = nodes.find((n) => {
-                  const d = n.data as GraphNodeData;
-                  return d.label.toLowerCase().includes(target) ||
-                    (d.subtitle && d.subtitle.toLowerCase().includes(target));
-                });
-                if (focusedNode) {
-                  setTimeout(() => {
-                    instance.fitView({
-                      nodes: [{ id: focusedNode.id }],
-                      duration: 800,
-                      padding: 3,
+          {activeTab === "patient" ? (
+            <>
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                nodeTypes={nodeTypes}
+                nodesDraggable
+                fitView
+                fitViewOptions={{ padding: 0.15 }}
+                colorMode="dark"
+                minZoom={0.05}
+                maxZoom={2.5}
+                proOptions={{ hideAttribution: true }}
+                defaultEdgeOptions={{
+                  type: "default",
+                  style: { strokeWidth: 1 },
+                }}
+                onInit={(instance) => {
+                  // Auto-zoom to focused node after initial layout
+                  if (focusLabel) {
+                    const target = focusLabel.toLowerCase();
+                    const focusedNode = nodes.find((n) => {
+                      const d = n.data as GraphNodeData;
+                      return d.label.toLowerCase().includes(target) ||
+                        (d.subtitle && d.subtitle.toLowerCase().includes(target));
                     });
-                  }, 300);
-                }
-              }
-            }}
-          >
-            <Background color="#1a1a2e" gap={40} size={1} />
-            <Controls
-              style={{
-                bottom: 12,
-                right: 12,
-                left: "auto",
-              }}
+                    if (focusedNode) {
+                      setTimeout(() => {
+                        instance.fitView({
+                          nodes: [{ id: focusedNode.id }],
+                          duration: 800,
+                          padding: 3,
+                        });
+                      }, 300);
+                    }
+                  }
+                }}
+              >
+                <Background color="#1a1a2e" gap={40} size={1} />
+                <Controls
+                  style={{
+                    bottom: 12,
+                    right: 12,
+                    left: "auto",
+                  }}
+                />
+                <MiniMap
+                  nodeColor={minimapNodeColor}
+                  maskColor="rgba(0,0,0,0.7)"
+                  style={{
+                    background: "#0d0d12",
+                    border: "1px solid rgba(255,255,255,0.06)",
+                    borderRadius: 10,
+                    height: 100,
+                    width: 150,
+                  }}
+                />
+              </ReactFlow>
+              <Legend />
+              <StatsBar data={patientData} />
+            </>
+          ) : activeTab === "reports" && hasReports && onOpenReport ? (
+            <ReportsKnowledgeGraph
+              manifest={reportManifest!}
+              protocolId={protocolId}
+              pacsAllStudies={pacsAllStudies}
+              onClose={onClose}
+              onOpenReport={onOpenReport}
             />
-            <MiniMap
-              nodeColor={minimapNodeColor}
-              maskColor="rgba(0,0,0,0.7)"
-              style={{
-                background: "#0d0d12",
-                border: "1px solid rgba(255,255,255,0.06)",
-                borderRadius: 10,
-                height: 100,
-                width: 150,
-              }}
+          ) : activeTab === "episodes" && hasEpisodes ? (
+            <EpisodesKnowledgeGraph
+              episodes={episodeManifest!}
+              protocolId={protocolId}
+              onClose={onClose}
+              onOpenEpisode={onOpenEpisode}
             />
-          </ReactFlow>
-          <Legend />
-          <StatsBar data={patientData} />
+          ) : null}
         </div>
       </div>
     </div>

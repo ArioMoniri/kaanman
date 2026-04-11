@@ -96,6 +96,8 @@ const ENTITY_COLORS: Record<string, { text: string; bg: string; border: string }
   drug:       { text: "#5eead4", bg: "rgba(20,184,166,0.08)",  border: "rgba(20,184,166,0.20)" },
   allergy:    { text: "#fca5a5", bg: "rgba(252,165,165,0.08)", border: "rgba(252,165,165,0.20)" },
   facility:   { text: "#67e8f9", bg: "rgba(34,211,238,0.08)",  border: "rgba(34,211,238,0.20)" },
+  report:     { text: "#a5b4fc", bg: "rgba(99,102,241,0.10)",  border: "rgba(99,102,241,0.25)" },
+  labtest:    { text: "#7dd3fc", bg: "rgba(14,165,233,0.10)",  border: "rgba(14,165,233,0.25)" },
 };
 
 const COUNTRY_LABELS: Record<string, string> = {
@@ -259,8 +261,31 @@ const DRUG_SUFFIX_RE = /\b([A-Za-z]{4,}(?:mab|zumab|ximab|mumab|nib|tinib|fenib|
 /** ICD-10 code pattern: Letter + 2 digits, optional .digit(s) */
 const ICD_CODE_RE = /\b([A-TV-Z]\d{2}(?:\.\d{1,2})?)\b/g;
 
+/** Report type names for deep linking */
+const REPORT_TYPE_NAMES = [
+  "Muayene", "Laboratuvar", "Radyoloji", "Kardiyoloji",
+  "Endoskopi", "SGK", "Patoloji",
+];
+
+/** Common Turkish lab test names for trend deep linking */
+const LAB_TEST_NAMES = [
+  "Lokosit", "Hemoglobin", "Hematokrit", "Trombosit", "Eritrosit",
+  "MCV", "MCH", "MCHC", "RDW", "MPV", "PCT", "PDW",
+  "Notrofil", "Lenfosit", "Monosit", "Eozinofil", "Bazofil",
+  "TSH", "sT3", "sT4", "T3", "T4",
+  "Kolesterol", "LDL", "HDL", "Trigliserit", "VLDL",
+  "Glukoz", "HbA1c", "Insulin",
+  "AST", "ALT", "GGT", "ALP", "LDH", "Bilirubin",
+  "BUN", "Kreatinin", "Albumin", "Protein",
+  "Sodyum", "Potasyum", "Kalsiyum", "Magnezyum", "Fosfor", "Klor",
+  "CRP", "Sedimantasyon", "Ferritin", "Demir", "B12", "Folat",
+  "Fibrinojen", "D-Dimer", "INR", "PT", "aPTT",
+  "PSA", "AFP", "CEA", "CA125", "CA15-3", "CA19-9",
+  "WBC", "RBC", "PLT", "Hgb", "Hct",
+];
+
 /** Pre-process text: wrap patient entity mentions with deep-link markers.
- *  Also pattern-detects ICD codes and drug names not in patient data.
+ *  Also pattern-detects ICD codes, drug names, report types, and lab tests.
  *  Produces Obsidian-style [[links]] as markdown links with #kg- prefix. */
 function preprocessDeepLinks(text: string, entities: DeepLinkEntity[]): string {
   // 1. Protect LaTeX, code, and existing links from modification
@@ -290,7 +315,31 @@ function preprocessDeepLinks(text: string, entities: DeepLinkEntity[]): string {
     }
   }
 
-  // 3. ICD-10 codes (pattern-based — catches codes not in patient data too)
+  // 3. Report type names — deep link to reports KG tab
+  for (const rt of REPORT_TYPE_NAMES) {
+    const escaped = rt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`\\b(${escaped})\\b`, "gi");
+    safe = safe.replace(re, (match) => {
+      const key = match.toLowerCase();
+      if (linked.has(key)) return match;
+      linked.add(key);
+      return `[${match}](#kg-report-${encodeURIComponent(match)})`;
+    });
+  }
+
+  // 4. Lab test names — deep link to trend monitor
+  for (const lt of LAB_TEST_NAMES) {
+    const escaped = lt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`\\b(${escaped})\\b`, "gi");
+    safe = safe.replace(re, (match) => {
+      const key = match.toLowerCase();
+      if (linked.has(key)) return match;
+      linked.add(key);
+      return `[${match}](#kg-labtest-${encodeURIComponent(match)})`;
+    });
+  }
+
+  // 5. ICD-10 codes (pattern-based — catches codes not in patient data too)
   safe = safe.replace(ICD_CODE_RE, (match) => {
     const key = match.toLowerCase();
     if (linked.has(key)) return match;
@@ -298,7 +347,7 @@ function preprocessDeepLinks(text: string, entities: DeepLinkEntity[]): string {
     return `[${match}](#kg-icd-${encodeURIComponent(match)})`;
   });
 
-  // 4. Drug names by pharmaceutical suffix (catches drugs not in patient's prescription list)
+  // 6. Drug names by pharmaceutical suffix (catches drugs not in patient's prescription list)
   safe = safe.replace(DRUG_SUFFIX_RE, (match) => {
     const key = match.toLowerCase();
     if (linked.has(key)) return match;
@@ -306,17 +355,17 @@ function preprocessDeepLinks(text: string, entities: DeepLinkEntity[]): string {
     return `[${match}](#kg-drug-${encodeURIComponent(match)})`;
   });
 
-  // 5. Restore placeholders
+  // 7. Restore placeholders
   safe = safe.replace(/\x00PH(\d+)\x00/g, (_, idx) => placeholders[parseInt(idx)]);
   return safe;
 }
 
 /** Render a single highlight item with markdown + LaTeX support + inline refs + deep links */
-function HighlightItem({ text, onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus, patientEntities }: { text: string; onOpenReferenceUrl?: (url: string, title: string) => void; citations?: Citation[]; onOpenReferences?: () => void; onOpenKgFocus?: (label: string) => void; patientEntities?: DeepLinkEntity[] }) {
+function HighlightItem({ text, onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus, patientEntities, onOpenReportType, onOpenTrendForTest }: { text: string; onOpenReferenceUrl?: (url: string, title: string) => void; citations?: Citation[]; onOpenReferences?: () => void; onOpenKgFocus?: (label: string) => void; patientEntities?: DeepLinkEntity[]; onOpenReportType?: (reportType: string) => void; onOpenTrendForTest?: (testName: string) => void }) {
   let processed = preprocessInlineRefs(text);
   processed = preprocessDeepLinks(processed, patientEntities || []);
   const hasLatex = processed.includes("$");
-  const components = markdownComponents(onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus);
+  const components = markdownComponents(onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus, onOpenReportType, onOpenTrendForTest);
 
   if (hasLatex) {
     const segments = splitLatex(processed);
@@ -345,13 +394,15 @@ function HighlightItem({ text, onOpenReferenceUrl, citations, onOpenReferences, 
 }
 
 /** Highlight component — renders all highlights immediately (no stagger delay) */
-function HighlightedContent({ highlights, onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus, patientEntities }: {
+function HighlightedContent({ highlights, onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus, patientEntities, onOpenReportType, onOpenTrendForTest }: {
   highlights: string[];
   onOpenReferenceUrl?: (url: string, title: string) => void;
   citations?: Citation[];
   onOpenReferences?: () => void;
   onOpenKgFocus?: (label: string) => void;
   patientEntities?: DeepLinkEntity[];
+  onOpenReportType?: (reportType: string) => void;
+  onOpenTrendForTest?: (testName: string) => void;
 }) {
   if (highlights.length === 0) {
     return (
@@ -368,7 +419,7 @@ function HighlightedContent({ highlights, onOpenReferenceUrl, citations, onOpenR
             <div className={`flex gap-2.5 items-start ${isAlert ? "bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2" : ""}`}>
               <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${isAlert ? "bg-red-400" : "bg-amber-400"}`} />
               <div className="text-base text-gray-200 leading-relaxed flex-1">
-                <HighlightItem text={h} onOpenReferenceUrl={onOpenReferenceUrl} citations={citations} onOpenReferences={onOpenReferences} onOpenKgFocus={onOpenKgFocus} patientEntities={patientEntities} />
+                <HighlightItem text={h} onOpenReferenceUrl={onOpenReferenceUrl} citations={citations} onOpenReferences={onOpenReferences} onOpenKgFocus={onOpenKgFocus} patientEntities={patientEntities} onOpenReportType={onOpenReportType} onOpenTrendForTest={onOpenTrendForTest} />
               </div>
             </div>
           </div>
@@ -401,18 +452,20 @@ function splitLatex(text: string): { content: string; isLatex: boolean; isDispla
 }
 
 /** Markdown renderer with proper styling — includes inline [N] ref support + deep links */
-function MarkdownContent({ content, onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus, patientEntities }: {
+function MarkdownContent({ content, onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus, patientEntities, onOpenReportType, onOpenTrendForTest }: {
   content: string;
   onOpenReferenceUrl?: (url: string, title: string) => void;
   citations?: Citation[];
   onOpenReferences?: () => void;
   onOpenKgFocus?: (label: string) => void;
   patientEntities?: DeepLinkEntity[];
+  onOpenReportType?: (reportType: string) => void;
+  onOpenTrendForTest?: (testName: string) => void;
 }) {
   let processed = preprocessInlineRefs(content);
   processed = preprocessDeepLinks(processed, patientEntities || []);
   const hasLatex = processed.includes("$");
-  const components = markdownComponents(onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus);
+  const components = markdownComponents(onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus, onOpenReportType, onOpenTrendForTest);
 
   if (hasLatex) {
     const segments = splitLatex(processed);
@@ -446,6 +499,8 @@ function markdownComponents(
   citations?: Citation[],
   onOpenReferences?: () => void,
   onOpenKgFocus?: (label: string) => void,
+  onOpenReportType?: (reportType: string) => void,
+  onOpenTrendForTest?: (testName: string) => void,
 ) {
   return {
     h1: ({ children, ...props }: React.ComponentPropsWithoutRef<"h1">) => (
@@ -517,9 +572,13 @@ function markdownComponents(
           drug: `Drug: ${label}`,
           allergy: `Allergy: "${label}" — View in Knowledge Graph`,
           facility: `Facility: "${label}" — View in Knowledge Graph`,
+          report: `Report type: "${label}" — View in Reports Graph`,
+          labtest: `Lab test: "${label}" — View trend`,
         };
         const tip = tipMap[category] || `${label} — View in Knowledge Graph`;
-        const canOpenKg = onOpenKgFocus && !["icd", "drug"].includes(category);
+        const isReport = category === "report";
+        const isLabTest = category === "labtest";
+        const canOpenKg = onOpenKgFocus && !["icd", "drug", "report", "labtest"].includes(category);
         return (
           <button
             className="inline-flex items-center gap-0.5 px-0.5 py-0 rounded text-[inherit] font-inherit transition-all align-baseline leading-inherit"
@@ -527,15 +586,22 @@ function markdownComponents(
               color: colors.text,
               borderBottom: `1.5px dotted ${colors.border}`,
               background: "transparent",
-              cursor: canOpenKg ? "pointer" : "help",
+              cursor: (isReport || isLabTest || canOpenKg) ? "pointer" : "help",
             }}
             title={tip}
             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = colors.bg; }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
             onClick={(e) => {
               e.preventDefault();
-              if (canOpenKg) onOpenKgFocus!(label);
-              else if (onOpenKgFocus) onOpenKgFocus(label);
+              if (isReport && onOpenReportType) {
+                onOpenReportType(label);
+              } else if (isLabTest && onOpenTrendForTest) {
+                onOpenTrendForTest(label);
+              } else if (canOpenKg) {
+                onOpenKgFocus!(label);
+              } else if (onOpenKgFocus) {
+                onOpenKgFocus(label);
+              }
             }}
           >
             {children}
@@ -601,6 +667,8 @@ interface MessageBubbleProps {
   onOpenReferenceUrl?: (url: string, title: string) => void;
   hasPatientData?: boolean;
   patientEntities?: DeepLinkEntity[];
+  onOpenReportType?: (reportType: string) => void;
+  onOpenTrendForTest?: (testName: string) => void;
 }
 
 export function MessageBubble({
@@ -612,6 +680,8 @@ export function MessageBubble({
   onOpenReferenceUrl,
   hasPatientData,
   patientEntities,
+  onOpenReportType,
+  onOpenTrendForTest,
 }: MessageBubbleProps) {
   const [mode, setMode] = useState<"fast" | "complete" | "highlight">("fast");
   const [showCitations, setShowCitations] = useState(false);
@@ -742,7 +812,7 @@ export function MessageBubble({
                   <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
                 </svg>
                 <div className="text-sm text-red-200 leading-relaxed flex-1 prose-content">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents(onOpenReferenceUrl, message.citations, onOpenReferences)}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents(onOpenReferenceUrl, message.citations, onOpenReferences, onOpenKnowledgeGraphFocus, onOpenReportType, onOpenTrendForTest)}>
                     {preprocessInlineRefs(alert.replace(/^⚠️\s*ALERT:\s*/i, "").replace(/^⚠️\s*CRITICAL:\s*/i, ""))}
                   </ReactMarkdown>
                 </div>
@@ -754,9 +824,9 @@ export function MessageBubble({
         {/* Answer content */}
         <div className="px-5 pb-4">
           {mode === "highlight" && hasDualMode ? (
-            <HighlightedContent highlights={highlights} onOpenReferenceUrl={onOpenReferenceUrl} citations={message.citations} onOpenReferences={onOpenReferences} onOpenKgFocus={onOpenKnowledgeGraphFocus} patientEntities={patientEntities} />
+            <HighlightedContent highlights={highlights} onOpenReferenceUrl={onOpenReferenceUrl} citations={message.citations} onOpenReferences={onOpenReferences} onOpenKgFocus={onOpenKnowledgeGraphFocus} patientEntities={patientEntities} onOpenReportType={onOpenReportType} onOpenTrendForTest={onOpenTrendForTest} />
           ) : (
-            <MarkdownContent content={displayContent} onOpenReferenceUrl={onOpenReferenceUrl} citations={message.citations} onOpenReferences={onOpenReferences} onOpenKgFocus={onOpenKnowledgeGraphFocus} patientEntities={patientEntities} />
+            <MarkdownContent content={displayContent} onOpenReferenceUrl={onOpenReferenceUrl} citations={message.citations} onOpenReferences={onOpenReferences} onOpenKgFocus={onOpenKnowledgeGraphFocus} patientEntities={patientEntities} onOpenReportType={onOpenReportType} onOpenTrendForTest={onOpenTrendForTest} />
           )}
         </div>
 

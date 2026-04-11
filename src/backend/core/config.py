@@ -22,6 +22,7 @@ class ModelConfig:
     drug: str = field(default_factory=lambda: _env("MODEL_DRUG", "claude-sonnet-4-6"))
     composer: str = field(default_factory=lambda: _env("MODEL_COMPOSER", "claude-sonnet-4-6"))
     trust: str = field(default_factory=lambda: _env("MODEL_TRUST", "claude-haiku-4-5-20251001"))
+    briefer: str = field(default_factory=lambda: _env("MODEL_BRIEFER", "claude-sonnet-4-6"))
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,8 @@ class Settings:
     models: ModelConfig = field(default_factory=ModelConfig)
     max_context_tokens: int = 100_000
     cerebral_host: str = field(default_factory=lambda: _env("CEREBRAL_HOST", "cerebralplustr.acibadem.com.tr"))
+    neo4j_uri: str = field(default_factory=lambda: _env("NEO4J_URI", "bolt://localhost:7687"))
+    neo4j_auth: str = field(default_factory=lambda: _env("NEO4J_AUTH", "neo4j/cerebralink2024"))
 
 
 settings = Settings()

@@ -11,6 +11,10 @@ import { DecisionTreeViewer } from "@/components/decision-tree-viewer";
 import { ReferenceLegend } from "@/components/reference-legend";
 import { ShimmerText } from "@/components/ui/shimmer-text";
 import { CerebraLinkLogo } from "@/components/ui/cerebralink-logo";
+import { ReportViewer } from "@/components/report-viewer";
+import { TrendMonitor } from "@/components/trend-monitor";
+import type { ManifestEntry } from "@/components/reports-knowledge-graph";
+import type { EpisodeEntry } from "@/components/episodes-knowledge-graph";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100";
 
@@ -296,6 +300,24 @@ export default function Home() {
   const [showHistory, setShowHistory] = useState(false);
   const [kgFocusLabel, setKgFocusLabel] = useState<string | undefined>(undefined);
 
+  // Report state
+  const [reportManifest, setReportManifest] = useState<ManifestEntry[] | null>(null);
+  const [reportTrends, setReportTrends] = useState<Record<string, unknown[]> | null>(null);
+  const [pacsAllStudies, setPacsAllStudies] = useState<string | null>(null);
+  const [selectedReport, setSelectedReport] = useState<{
+    file: string;
+    textFile?: string;
+    title: string;
+    highlightText?: string;
+    reportId?: string;
+    accessionNumber?: string;
+    fileEndpointType?: "reports" | "episodes";
+  } | null>(null);
+  const [showTrendMonitor, setShowTrendMonitor] = useState(false);
+
+  // Episode state
+  const [episodeManifest, setEpisodeManifest] = useState<EpisodeEntry[] | null>(null);
+
   // Patient entities for Obsidian-style deep links
   const patientEntities = useMemo(() => extractPatientEntities(patientData), [patientData]);
 
@@ -310,6 +332,78 @@ export default function Home() {
 
   const handleOpenKgWithFocus = useCallback((label?: string) => {
     setKgFocusLabel(label);
+    setShowKnowledgeGraph(true);
+  }, []);
+
+  const handleOpenReport = useCallback(
+    (file: string, textFile?: string, title?: string, highlightText?: string) => {
+      setSelectedReport({
+        file,
+        textFile,
+        title: title || file,
+        highlightText,
+      });
+    },
+    [],
+  );
+
+  const handleOpenReportEntry = useCallback(
+    (entry: ManifestEntry) => {
+      setSelectedReport({
+        file: entry.file,
+        textFile: entry.text_file,
+        title: entry.report_name || entry.file,
+        reportId: entry.report_id,
+        accessionNumber: entry.accession_number,
+      });
+    },
+    [],
+  );
+
+  const handleOpenTrend = useCallback(
+    async (_testName?: string) => {
+      // Extract protocol ID from patient data
+      const pid =
+        (patientData as Record<string, unknown>)?.protocol_no as string ||
+        (patientData as Record<string, unknown>)?.patient_id as string ||
+        ((patientData as Record<string, unknown>)?.patient as Record<string, unknown>)?.patient_id as string ||
+        "";
+      if (!pid) return;
+      // If we already have trends cached, just show the monitor
+      if (reportTrends) {
+        setShowTrendMonitor(true);
+        return;
+      }
+      try {
+        const resp = await fetch(`${API_URL}/api/reports/${pid}/trends`);
+        if (!resp.ok) return;
+        const json = await resp.json();
+        const trends = json.trends || {};
+        setReportTrends(trends);
+        setShowTrendMonitor(true);
+      } catch {
+        // silently fail
+      }
+    },
+    [patientData, reportTrends],
+  );
+
+  const handleOpenEpisode = useCallback(
+    (entry: EpisodeEntry) => {
+      // Open episode text file in a simple text viewer via episodes endpoint
+      if (entry.output_file) {
+        setSelectedReport({
+          file: entry.output_file,
+          title: `${entry.is_hospitalization ? "Yatış" : "Poliklinik"}: ${entry.date} — ${entry.service_text}`,
+          fileEndpointType: "episodes",
+        });
+      }
+    },
+    [],
+  );
+
+  const handleOpenReportType = useCallback((reportType: string) => {
+    setKgFocusLabel(reportType);
     setShowKnowledgeGraph(true);
   }, []);
 
@@ -563,6 +657,12 @@ export default function Home() {
     setShowReferences(false);
     setActiveDecisionTree(null);
     setShowKnowledgeGraph(false);
+    setReportManifest(null);
+    setReportTrends(null);
+    setPacsAllStudies(null);
+    setSelectedReport(null);
+    setShowTrendMonitor(false);
+    setEpisodeManifest(null);
   };
 
   // Check for patient data on session
@@ -577,6 +677,95 @@ export default function Home() {
       })
       .catch(() => {});
   }, [sessionId]);
+
+  // Fetch report manifest + trends in parallel when patient data is available
+  useEffect(() => {
+    if (!patientData) return;
+    const pid =
+      (patientData as Record<string, unknown>)?.protocol_no as string ||
+      (patientData as Record<string, unknown>)?.patient_id as string ||
+      ((patientData as Record<string, unknown>)?.patient as Record<string, unknown>)?.patient_id as string ||
+      "";
+    if (!pid) return;
+
+    const fetchManifestAndTrends = async () => {
+      try {
+        // Fetch manifest, trends, and episodes in parallel
+        const [manifestRes, trendsRes, episodesRes] = await Promise.allSettled([
+          fetch(`${API_URL}/api/reports/${pid}/manifest`).then((r) => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+          }),
+          fetch(`${API_URL}/api/reports/${pid}/trends`).then((r) => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+          }),
+          fetch(`${API_URL}/api/episodes/${pid}/manifest`).then((r) => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+          }),
+        ]);
+
+        if (manifestRes.status === "fulfilled" && manifestRes.value?.manifest) {
+          setReportManifest(manifestRes.value.manifest);
+          if (manifestRes.value.pacs_all_studies) {
+            setPacsAllStudies(manifestRes.value.pacs_all_studies);
+          }
+        }
+        if (trendsRes.status === "fulfilled" && trendsRes.value?.trends) {
+          setReportTrends(trendsRes.value.trends);
+        }
+        if (episodesRes.status === "fulfilled" && episodesRes.value?.episodes) {
+          setEpisodeManifest(episodesRes.value.episodes);
+        }
+
+        // If manifest was not found, trigger report fetch
+        if (manifestRes.status === "rejected") {
+          try {
+            const fetchRes = await fetch(`${API_URL}/api/reports/fetch/${pid}`, { method: "POST" });
+            if (fetchRes.ok) {
+              const data = await fetchRes.json();
+              if (data.success) {
+                // Re-fetch manifest + trends after download
+                const [m, t] = await Promise.allSettled([
+                  fetch(`${API_URL}/api/reports/${pid}/manifest`).then((r) => r.json()),
+                  fetch(`${API_URL}/api/reports/${pid}/trends`).then((r) => r.json()),
+                ]);
+                if (m.status === "fulfilled" && m.value?.manifest) {
+                  setReportManifest(m.value.manifest);
+                  if (m.value.pacs_all_studies) {
+                    setPacsAllStudies(m.value.pacs_all_studies);
+                  }
+                }
+                if (t.status === "fulfilled" && t.value?.trends) {
+                  setReportTrends(t.value.trends);
+                }
+              }
+            }
+          } catch { /* report fetch not available */ }
+        }
+
+        // If episodes were not found, trigger episode fetch
+        if (episodesRes.status === "rejected") {
+          try {
+            const epRes = await fetch(`${API_URL}/api/episodes/fetch/${pid}`, { method: "POST" });
+            if (epRes.ok) {
+              const epData = await epRes.json();
+              if (epData.success) {
+                const re = await fetch(`${API_URL}/api/episodes/${pid}/manifest`);
+                if (re.ok) {
+                  const reData = await re.json();
+                  if (reData.episodes) setEpisodeManifest(reData.episodes);
+                }
+              }
+            }
+          } catch { /* episode fetch not available */ }
+        }
+      } catch { /* network error */ }
+    };
+
+    fetchManifestAndTrends();
+  }, [patientData]);
 
   // Persist session to history whenever messages or patient change
   useEffect(() => {
@@ -746,6 +935,8 @@ export default function Home() {
               onOpenReferenceUrl={handleOpenReferenceUrl}
               hasPatientData={!!patientData}
               patientEntities={patientEntities}
+              onOpenReportType={handleOpenReportType}
+              onOpenTrendForTest={handleOpenTrend}
             />
           ))}
 
@@ -793,6 +984,52 @@ export default function Home() {
           patientData={patientData}
           onClose={() => { setShowKnowledgeGraph(false); setKgFocusLabel(undefined); }}
           focusLabel={kgFocusLabel}
+          reportManifest={reportManifest || undefined}
+          protocolId={
+            ((patientData as Record<string, unknown>)?.protocol_no as string) ||
+            ((patientData as Record<string, unknown>)?.patient_id as string) ||
+            (((patientData as Record<string, unknown>)?.patient as Record<string, unknown>)?.patient_id as string) ||
+            undefined
+          }
+          pacsAllStudies={pacsAllStudies || undefined}
+          onOpenReport={handleOpenReportEntry}
+          onOpenTrend={handleOpenTrend}
+          episodeManifest={episodeManifest || undefined}
+          onOpenEpisode={handleOpenEpisode}
+        />
+      )}
+
+      {/* Report Viewer Modal */}
+      {selectedReport && (
+        <ReportViewer
+          file={selectedReport.file}
+          textFile={selectedReport.textFile}
+          title={selectedReport.title}
+          protocolId={
+            ((patientData as Record<string, unknown>)?.protocol_no as string) ||
+            ((patientData as Record<string, unknown>)?.patient_id as string) ||
+            (((patientData as Record<string, unknown>)?.patient as Record<string, unknown>)?.patient_id as string) ||
+            ""
+          }
+          onClose={() => setSelectedReport(null)}
+          highlightText={selectedReport.highlightText}
+          reportId={selectedReport.reportId}
+          accessionNumber={selectedReport.accessionNumber}
+          fileEndpointType={selectedReport.fileEndpointType || "reports"}
+        />
+      )}
+
+      {/* Trend Monitor Popup */}
+      {showTrendMonitor && reportTrends && (
+        <TrendMonitor
+          protocolId={
+            ((patientData as Record<string, unknown>)?.protocol_no as string) ||
+            ((patientData as Record<string, unknown>)?.patient_id as string) ||
+            (((patientData as Record<string, unknown>)?.patient as Record<string, unknown>)?.patient_id as string) ||
+            ""
+          }
+          trends={reportTrends as Record<string, never[]>}
+          onClose={() => setShowTrendMonitor(false)}
         />
       )}
 

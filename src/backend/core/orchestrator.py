@@ -14,7 +14,9 @@ Flow:
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
+import traceback
 from typing import Any, Callable, Awaitable
 
 from src.backend.agents.router import RouterAgent, RouteDecision
@@ -25,21 +27,48 @@ from src.backend.agents.composer import ComposerAgent
 from src.backend.agents.trust import TrustScorerAgent
 from src.backend.agents.decision_tree import DecisionTreeAgent
 from src.backend.agents.phi_masker import PhiMasker
+from src.backend.agents.reports import ReportsAgent
+from src.backend.agents.episodes import EpisodesAgent
 from src.backend.core.memory import AgentMemory, SharedMemory, SessionMemory
 from src.backend.api.schemas import (
     TrustScores, TrustReasons, GuidelineRef, Citation, AgentTiming,
     DecisionTree, DecisionTreeNode, DecisionTreeEdge,
 )
 from src.backend.tools.cerebral import auto_fetch_patient
+from src.backend.tools.reports import auto_fetch_reports, reports_exist, get_manifest, get_reports_dir
+from src.backend.tools.reports_rag import index_reports, get_report_brief, chunks_indexed
+from src.backend.tools.episodes import (
+    auto_fetch_episodes,
+    episodes_exist,
+    get_manifest as get_episodes_manifest,
+    get_episodes_dir,
+)
+from src.backend.tools.episodes_rag import (
+    index_episodes,
+    get_episodes_summary,
+    episodes_indexed as episodes_rag_indexed,
+)
+from src.backend.tools.graph import (
+    neo4j_available,
+    ingest_patient_history,
+    ingest_reports as graph_ingest_reports,
+    ingest_episodes as graph_ingest_episodes,
+)
 
 StatusCallback = Callable[[dict[str, Any]], Awaitable[None]] | None
 
 AGENT_LABELS = {
     "router": "Classifying query...",
     "patient_fetch": "Fetching patient data...",
+    "reports_fetch": "Fetching patient reports...",
+    "episodes_fetch": "Fetching episode history...",
+    "reports_index": "Indexing reports & generating brief...",
+    "episodes_index": "Indexing episodes & generating summary...",
     "clinical": "Deep clinical analysis...",
     "research": "Searching latest guidelines...",
     "drug": "Analyzing drug interactions & dosing...",
+    "reports": "Analyzing patient reports...",
+    "episodes": "Analyzing episode history...",
     "composer_fast": "Composing fast answer...",
     "composer_complete": "Composing complete analysis...",
     "decision_tree": "Generating decision tree...",
@@ -97,6 +126,8 @@ class Orchestrator:
         self.clinical = ClinicalAgent()
         self.research = ResearchAgent()
         self.drug = DrugAgent()
+        self.reports_agent = ReportsAgent()
+        self.episodes_agent = EpisodesAgent()
         self.composer = ComposerAgent()
         self.trust_scorer = TrustScorerAgent()
         self.decision_tree_agent = DecisionTreeAgent()
@@ -166,28 +197,124 @@ class Orchestrator:
             "guideline_countries": route.guideline_countries,
         })
 
-        # ── 2. Auto-fetch patient if protocol ID detected ──
-        if route.detected_protocol_id and not patient_context:
+        # ── 2. Auto-fetch patient data + reports in parallel ──
+        detected_pid = route.detected_protocol_id
+
+        # Extract protocol ID from existing patient context for follow-up questions
+        if not detected_pid and patient_context:
+            pc = patient_context.get("patient", patient_context)
+            detected_pid = (
+                pc.get("protocol_no")
+                or pc.get("patient_id")
+                or pc.get("protocol_id")
+            ) or None
+
+        reports_manifest = None
+        reports_dir_path = None
+        episodes_manifest = None
+        episodes_dir_path = None
+
+        if detected_pid and not patient_context:
             await self._emit(on_status, {
                 "agent": "patient_fetch", "status": "running",
-                "message": f"Fetching patient {route.detected_protocol_id}...",
+                "message": f"Fetching patient {detected_pid}...",
                 "phase": "patient_fetch",
             })
+
+            # Fetch patient data and reports in parallel
             t0 = time.monotonic()
-            try:
-                raw_patient = await auto_fetch_patient(route.detected_protocol_id)
+
+            async def _fetch_patient_data():
+                raw_patient = await auto_fetch_patient(detected_pid)
                 masked = await self.phi_checker.mask_patient_record(raw_patient)
-                patient_context = masked.get("masked_record", raw_patient)
+                return masked.get("masked_record", raw_patient)
+
+            async def _fetch_reports_data():
+                """Fetch reports if not already on disk."""
+                if reports_exist(detected_pid):
+                    return get_manifest(detected_pid), str(get_reports_dir(detected_pid))
+                try:
+                    await self._emit(on_status, {
+                        "agent": "reports_fetch", "status": "running",
+                        "message": f"Fetching reports for {detected_pid}...",
+                        "phase": "patient_fetch",
+                    })
+                    rdata = await auto_fetch_reports(detected_pid)
+                    return rdata["manifest"], rdata["reports_dir"]
+                except Exception as re:
+                    logging.getLogger("cerebralink.orchestrator").warning(
+                        "Reports fetch failed for %s: %s", detected_pid, re
+                    )
+                    return None, None
+
+            async def _fetch_episodes_data():
+                """Fetch episodes if not already on disk."""
+                if episodes_exist(detected_pid):
+                    return get_episodes_manifest(detected_pid), str(get_episodes_dir(detected_pid))
+                try:
+                    await self._emit(on_status, {
+                        "agent": "episodes_fetch", "status": "running",
+                        "message": f"Fetching episodes for {detected_pid}...",
+                        "phase": "patient_fetch",
+                    })
+                    edata = await auto_fetch_episodes(detected_pid)
+                    return edata["manifest"], edata["episodes_dir"]
+                except Exception as ee:
+                    logging.getLogger("cerebralink.orchestrator").warning(
+                        "Episodes fetch failed for %s: %s", detected_pid, ee
+                    )
+                    return None, None
+
+            try:
+                patient_result, reports_result, episodes_result = await asyncio.gather(
+                    _fetch_patient_data(),
+                    _fetch_reports_data(),
+                    _fetch_episodes_data(),
+                    return_exceptions=False,
+                )
+
+                patient_context = patient_result
                 mem = SessionMemory(session_id)
                 await mem.set_patient_context(patient_context)
+                result.patient_context = patient_context
+
+                # Neo4j: ingest patient history in background (non-blocking)
+                if neo4j_available() and patient_context:
+                    try:
+                        ingest_patient_history(patient_context)
+                    except Exception:
+                        pass  # Graph ingestion is best-effort
+
                 t_fetch = int((time.monotonic() - t0) * 1000)
                 result.agents_used.append("patient_fetch")
                 result.agent_timings.append(AgentTiming(agent="patient_fetch", time_ms=t_fetch))
-                result.patient_context = patient_context
+
                 await self._emit(on_status, {
                     "agent": "patient_fetch", "status": "done",
                     "time_ms": t_fetch, "message": "Patient data loaded & PHI-masked",
                 })
+
+                # Unpack reports result
+                if isinstance(reports_result, tuple):
+                    reports_manifest, reports_dir_path = reports_result
+                if reports_manifest:
+                    await self._emit(on_status, {
+                        "agent": "reports_fetch", "status": "done",
+                        "time_ms": t_fetch,
+                        "message": f"Reports loaded: {len(reports_manifest)} reports",
+                    })
+
+                # Unpack episodes result
+                if isinstance(episodes_result, tuple):
+                    episodes_manifest, episodes_dir_path = episodes_result
+                if episodes_manifest:
+                    yatis_n = sum(1 for e in episodes_manifest if e.get("is_hospitalization"))
+                    poli_n = len(episodes_manifest) - yatis_n
+                    await self._emit(on_status, {
+                        "agent": "episodes_fetch", "status": "done",
+                        "time_ms": t_fetch,
+                        "message": f"Episodes loaded: {yatis_n} yatış, {poli_n} poliklinik",
+                    })
             except FileNotFoundError as e:
                 t_fetch = int((time.monotonic() - t0) * 1000)
                 await self._emit(on_status, {
@@ -197,17 +324,102 @@ class Orchestrator:
                 })
             except Exception as e:
                 t_fetch = int((time.monotonic() - t0) * 1000)
-                import traceback
                 tb = traceback.format_exc()
                 await self._emit(on_status, {
                     "agent": "patient_fetch", "status": "error",
                     "time_ms": t_fetch,
                     "message": f"Patient fetch failed: {type(e).__name__}: {e}",
                 })
-                import logging
                 logging.getLogger("cerebralink.orchestrator").error(
-                    "Patient fetch error for protocol %s:\n%s", route.detected_protocol_id, tb
+                    "Patient fetch error for protocol %s:\n%s", detected_pid, tb
                 )
+
+        # ── 2a. Load reports/episodes from disk for follow-up questions ──
+        if detected_pid and reports_manifest is None and reports_exist(detected_pid):
+            reports_manifest = get_manifest(detected_pid)
+            reports_dir_path = str(get_reports_dir(detected_pid))
+
+        if detected_pid and episodes_manifest is None and episodes_exist(detected_pid):
+            episodes_manifest = get_episodes_manifest(detected_pid)
+            episodes_dir_path = str(get_episodes_dir(detected_pid))
+
+        # ── 2b. Index reports + generate brief (if not cached / expired) ──
+        if detected_pid and reports_manifest and reports_dir_path:
+            brief_cached = await get_report_brief(detected_pid)
+            rag_indexed = await chunks_indexed(detected_pid)
+            if not brief_cached or not rag_indexed:
+                await self._emit(on_status, {
+                    "agent": "reports_index", "status": "running",
+                    "message": "Indexing reports & generating brief...",
+                    "phase": "patient_fetch",
+                })
+                t0_idx = time.monotonic()
+                try:
+                    await asyncio.gather(
+                        index_reports(detected_pid, reports_manifest, reports_dir_path),
+                        self.reports_agent.generate_brief(
+                            protocol_id=detected_pid,
+                            manifest=reports_manifest,
+                            reports_dir=reports_dir_path,
+                            language=result.language,
+                        ),
+                        return_exceptions=True,
+                    )
+                    t_idx = int((time.monotonic() - t0_idx) * 1000)
+                    result.agents_used.append("reports_index")
+                    result.agent_timings.append(AgentTiming(agent="reports_index", time_ms=t_idx))
+                    await self._emit(on_status, {
+                        "agent": "reports_index", "status": "done",
+                        "time_ms": t_idx, "message": "Reports indexed & brief generated",
+                    })
+                except Exception:
+                    pass
+
+            # Neo4j: ingest reports into graph (best-effort, non-blocking)
+            if neo4j_available():
+                try:
+                    graph_ingest_reports(detected_pid, reports_manifest)
+                except Exception:
+                    pass
+
+        # ── 2c. Index episodes + generate summary (if not cached / expired) ──
+        if detected_pid and episodes_manifest and episodes_dir_path:
+            summary_cached = await get_episodes_summary(detected_pid)
+            rag_indexed = await episodes_rag_indexed(detected_pid)
+            if not summary_cached or not rag_indexed:
+                await self._emit(on_status, {
+                    "agent": "episodes_index", "status": "running",
+                    "message": "Indexing episodes & generating summary...",
+                    "phase": "patient_fetch",
+                })
+                t0_eidx = time.monotonic()
+                try:
+                    await asyncio.gather(
+                        index_episodes(detected_pid, episodes_manifest, episodes_dir_path),
+                        self.episodes_agent.generate_summary(
+                            protocol_id=detected_pid,
+                            manifest=episodes_manifest,
+                            episodes_dir=episodes_dir_path,
+                            language=result.language,
+                        ),
+                        return_exceptions=True,
+                    )
+                    t_eidx = int((time.monotonic() - t0_eidx) * 1000)
+                    result.agents_used.append("episodes_index")
+                    result.agent_timings.append(AgentTiming(agent="episodes_index", time_ms=t_eidx))
+                    await self._emit(on_status, {
+                        "agent": "episodes_index", "status": "done",
+                        "time_ms": t_eidx, "message": "Episodes indexed & summary generated",
+                    })
+                except Exception:
+                    pass
+
+            # Neo4j: ingest episodes into graph (best-effort)
+            if neo4j_available():
+                try:
+                    graph_ingest_episodes(detected_pid, episodes_manifest)
+                except Exception:
+                    pass
 
         # ── 3. Fan-out: parallel agents ──
         agent_map: dict[str, tuple] = {}
@@ -217,6 +429,25 @@ class Orchestrator:
             agent_map["research"] = (self.research, self.research.search, (message, route.guideline_countries))
         if route.needs_drug:
             agent_map["drug"] = (self.drug, self.drug.analyze, (message, patient_context, route.priority_country))
+
+        # Reports agent runs in parallel when we have patient context + reports
+        if route.needs_patient_context and detected_pid and reports_manifest:
+            fast_mode = not route.needs_clinical  # fast when no deep analysis needed
+            agent_map["reports"] = (
+                self.reports_agent,
+                self.reports_agent.analyze_for_council,
+                (message, detected_pid, fast_mode, route.language),
+            )
+
+        # Episodes agent runs in parallel when we have episode data
+        if route.needs_patient_context and detected_pid and episodes_manifest:
+            fast_mode = not route.needs_clinical
+            agent_map["episodes"] = (
+                self.episodes_agent,
+                self.episodes_agent.analyze_for_council,
+                (message, detected_pid, fast_mode, route.language),
+            )
+
         if not agent_map:
             agent_map["clinical"] = (self.clinical, self.clinical.analyze, (message, patient_context, history))
 
