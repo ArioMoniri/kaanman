@@ -195,6 +195,12 @@ async def fetch_reports(protocol_id: str, cookie_string: str) -> dict[str, Any]:
 
     output_dir = _reports_dir(protocol_id)
 
+    # Find cookies for env var passthrough (read-only Docker mount safe)
+    _cookies = COOKIES_DIR / "cookies.json"
+    if not _cookies.exists():
+        _cookies = SCRIPTS_DIR / "cookies.json"
+    env = {**__import__("os").environ, "COOKIES_FILE": str(_cookies)} if _cookies.exists() else None
+
     try:
         proc = subprocess.run(
             [
@@ -205,6 +211,7 @@ async def fetch_reports(protocol_id: str, cookie_string: str) -> dict[str, Any]:
             capture_output=True,
             text=True,
             timeout=600,
+            env=env,
         )
         if proc.returncode != 0:
             stderr_lines = proc.stderr.strip().split("\n")
@@ -232,23 +239,24 @@ async def auto_fetch_reports(protocol_id: str) -> dict[str, Any]:
     """
     protocol_id = _normalize_protocol_id(protocol_id)
 
-    cookies_file = SCRIPTS_DIR / "cookies.json"
+    # Find cookies.json — prefer cookies/ dir (Docker mount), fall back to scripts/
+    cookies_file = COOKIES_DIR / "cookies.json"
     if not cookies_file.exists():
-        alt_cookies = COOKIES_DIR / "cookies.json"
-        if not alt_cookies.exists():
-            raise FileNotFoundError(
-                f"No cookies.json found in {SCRIPTS_DIR} or {COOKIES_DIR}. "
-                "Export cookies from your browser and place them in the scripts/ folder."
-            )
-        import shutil
-        shutil.copy2(str(alt_cookies), str(cookies_file))
-        log.info("Copied cookies.json from %s to %s", alt_cookies, cookies_file)
+        cookies_file = SCRIPTS_DIR / "cookies.json"
+    if not cookies_file.exists():
+        raise FileNotFoundError(
+            f"No cookies.json found in {COOKIES_DIR} or {SCRIPTS_DIR}. "
+            "Export cookies from your browser and place them in the cookies/ folder."
+        )
 
     report_script = SCRIPTS_DIR / "cerebral_reports_w_pacs.py"
     if not report_script.exists():
         raise FileNotFoundError(f"Report script not found: {report_script}")
 
     output_dir = _reports_dir(protocol_id)
+
+    # Pass COOKIES_FILE env var so the script finds cookies even on read-only mounts
+    env = {**__import__("os").environ, "COOKIES_FILE": str(cookies_file)}
 
     try:
         proc = subprocess.run(
@@ -260,6 +268,7 @@ async def auto_fetch_reports(protocol_id: str) -> dict[str, Any]:
             capture_output=True,
             text=True,
             timeout=600,
+            env=env,
         )
         if proc.returncode != 0:
             stderr_lines = proc.stderr.strip().split("\n")

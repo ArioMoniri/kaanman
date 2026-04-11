@@ -122,13 +122,20 @@ async def auto_fetch_episodes(protocol_id: str) -> dict[str, Any]:
             "Export cookies from your browser and place them in the cookies/ folder."
         )
 
+    # Pass COOKIES_FILE env var so the script finds cookies even on read-only mounts
+    # CWD must be PROJECT_ROOT (not SCRIPTS_DIR) because Docker mounts scripts/ read-only
+    # and the script creates episodes_{pid}/ relative to CWD.
+    import os as _os
+    env = {**_os.environ, "COOKIES_FILE": str(cookies_file)}
+
     try:
         proc = subprocess.run(
             [sys.executable, str(fetch_script), protocol_id],
             capture_output=True,
             text=True,
             timeout=300,
-            cwd=str(SCRIPTS_DIR),
+            cwd=str(PROJECT_ROOT),
+            env=env,
         )
         if proc.returncode != 0:
             stderr_lines = proc.stderr.strip().split("\n")

@@ -44,7 +44,13 @@ from urllib3.util.retry import Retry
 
 # ─── Configuration ───────────────────────────────────────────────────
 BASE_URL = "https://cerebralplustr.acibadem.com.tr"
-COOKIES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.json")
+COOKIES_FILE = os.environ.get("COOKIES_FILE") or next(
+    (p for p in [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cookies", "cookies.json"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.json"),
+    ] if os.path.isfile(p)),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.json"),
+)
 MAX_WORKERS = 4  # concurrent fetches for episode details
 
 # ─── HTML Text Extractor ─────────────────────────────────────────────

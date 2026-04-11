@@ -70,7 +70,13 @@ PACS_BASE = "https://pacskad.acibadem.com.tr/uniview/"
 PACS_USER = "sectra"
 PACS_MRN_GROUP = "URL"
 PACS_SECRET = "Sectra2020*"
-COOKIES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.json")
+COOKIES_FILE = os.environ.get("COOKIES_FILE") or next(
+    (p for p in [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cookies", "cookies.json"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.json"),
+    ] if os.path.isfile(p)),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.json"),
+)
 
 REPORT_OPEN_TYPES = {"M", "0", "G", "X", "K", "O", "D", "F"}
 MM_REPORT_TYPES = {"H"}
