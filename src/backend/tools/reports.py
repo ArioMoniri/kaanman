@@ -346,6 +346,12 @@ def get_manifest(protocol_id: str) -> list[dict] | None:
 def get_manifest_with_pacs(protocol_id: str) -> dict | None:
     """Load manifest with PACS metadata (patient_id, pacs_all_studies).
 
+    Always regenerates pacs_all_studies with a fresh timestamp so the
+    signed URL is valid when the frontend uses it.  Per-study pacs_url
+    fields are also refreshed for reports that have accession_number.
+    For radiology reports without an accession_number, pacs_url is set
+    to the all-studies link so every radiology entry is clickable.
+
     Returns the full manifest object, or None if missing.
     """
     protocol_id = _normalize_protocol_id(protocol_id)
@@ -357,11 +363,26 @@ def get_manifest_with_pacs(protocol_id: str) -> dict | None:
 
     if isinstance(raw, list):
         # Old format — wrap it
-        return {
+        raw = {
             "patient_id": protocol_id,
             "pacs_all_studies": None,
             "reports": raw,
         }
+
+    # Regenerate PACS URLs with fresh timestamps
+    patient_id = raw.get("patient_id", protocol_id)
+    fresh_all = generate_pacs_url(patient_id, "show_images")
+    raw["pacs_all_studies"] = fresh_all
+
+    for entry in raw.get("reports", []):
+        acc_no = entry.get("accession_number")
+        if acc_no:
+            # Per-study link with accession number
+            entry["pacs_url"] = generate_pacs_url(patient_id, "show_study", acc_no)
+        elif "radyoloji" in entry.get("report_type", "").lower():
+            # Radiology without accession → link to all-studies
+            entry["pacs_url"] = fresh_all
+
     return raw
 
 

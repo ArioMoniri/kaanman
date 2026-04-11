@@ -971,6 +971,18 @@ export function MessageBubble({
                     priorityCountry
                   );
 
+                  // Compute a human-readable impact label — always shown
+                  const impactLabel = c.importance
+                    ? (c.importance === "high" ? "High impact" : c.importance === "medium" ? "Moderate impact" : "Low impact")
+                    : c.effect_size && c.effect_size !== "none"
+                    ? (c.effect_size === "large" ? "High impact" : c.effect_size === "moderate" ? "Moderate impact" : "Contextual")
+                    : variant === "green" ? "High impact"
+                    : variant === "blue" ? "Moderate impact"
+                    : variant === "teal-subtle" ? "WHO / International"
+                    : variant === "amber" ? "Priority country"
+                    : variant === "purple-subtle" ? "Contextual"
+                    : "Low impact";
+
                   const openInBrowser = (e: React.MouseEvent) => {
                     e.stopPropagation();
                     if (c.url && onOpenReferenceUrl) {
@@ -1011,28 +1023,16 @@ export function MessageBubble({
                               {c.year}
                             </span>
                           )}
-                          {c.importance && (
-                            <button
-                              onClick={openInBrowser}
-                              className="cursor-pointer hover:scale-110 hover:brightness-125 transition-all hover:ring-1 hover:ring-accent/30 rounded-full"
-                              title={c.url ? `${c.importance} importance — click to open article` : `${c.importance} importance`}
-                            >
-                              <Badge variant={c.importance === "high" ? "green" : c.importance === "medium" ? "blue" : "gray-subtle"} size="sm">
-                                {c.importance}
-                              </Badge>
-                            </button>
-                          )}
-                          {c.effect_size && c.effect_size !== "none" && (
-                            <button
-                              onClick={openInBrowser}
-                              className="cursor-pointer hover:scale-110 hover:brightness-125 transition-all hover:ring-1 hover:ring-accent/30 rounded-full"
-                              title={c.url ? `${c.effect_size} effect size — click to open article` : `${c.effect_size} effect size`}
-                            >
-                              <Badge variant={c.effect_size === "large" ? "green" : c.effect_size === "moderate" ? "blue" : "purple-subtle"} size="sm">
-                                {c.effect_size} effect
-                              </Badge>
-                            </button>
-                          )}
+                          {/* Always-visible impact badge — computed from LLM data or heuristics */}
+                          <button
+                            onClick={openInBrowser}
+                            className="cursor-pointer hover:scale-110 hover:brightness-125 transition-all hover:ring-1 hover:ring-accent/30 rounded-full"
+                            title={c.url ? `${impactLabel} — click to open article` : impactLabel}
+                          >
+                            <Badge variant={variant} size="sm">
+                              {impactLabel}
+                            </Badge>
+                          </button>
                           {c.evidence_level && (
                             <button
                               onClick={openInBrowser}

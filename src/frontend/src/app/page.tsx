@@ -409,8 +409,8 @@ export default function Home() {
 
   const handleOpenPacsEntry = useCallback(
     (entry: ManifestEntry) => {
-      if (entry.accession_number || entry.pacs_url) {
-        // Open report viewer with PACS info — the viewer has PACS link handling built-in
+      if (entry.accession_number) {
+        // Per-study PACS link via report viewer (has accession number)
         setSelectedReport({
           file: entry.file,
           textFile: entry.text_file,
@@ -418,8 +418,11 @@ export default function Home() {
           reportId: entry.report_id,
           accessionNumber: entry.accession_number,
         });
+      } else if (entry.pacs_url) {
+        // Radiology without accession — use the fresh signed PACS URL from manifest
+        window.open(entry.pacs_url, "_blank", "noopener,noreferrer");
       } else if (pacsAllStudies) {
-        // No accession number — open the PACS all-studies viewer directly
+        // Fallback — open all-studies PACS viewer
         window.open(pacsAllStudies, "_blank", "noopener,noreferrer");
       }
     },
