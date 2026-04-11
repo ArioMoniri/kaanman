@@ -28,6 +28,8 @@ class ModelConfig:
 class Settings:
     anthropic_api_key: str = field(default_factory=lambda: _env("ANTHROPIC_API_KEY"))
     exa_api_key: str = field(default_factory=lambda: _env("EXA_API_KEY"))
+    groq_api_key: str = field(default_factory=lambda: _env("GROQ_API_KEY"))
+    openai_api_key: str = field(default_factory=lambda: _env("OPENAI_API_KEY"))
     redis_url: str = field(default_factory=lambda: _env("REDIS_URL", "redis://localhost:6379/0"))
     medical_mcp_url: str = field(default_factory=lambda: _env("MEDICAL_MCP_URL", "http://localhost:3001"))
     models: ModelConfig = field(default_factory=ModelConfig)

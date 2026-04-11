@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 
 from src.backend.api.schemas import (
@@ -19,6 +19,7 @@ from src.backend.core.memory import SessionMemory
 from src.backend.core.orchestrator import Orchestrator
 from src.backend.agents.phi_masker import PhiMasker
 from src.backend.tools.cerebral import ingest_cookies_json
+from src.backend.tools.transcribe import transcribe_audio, get_transcription_provider
 
 router = APIRouter()
 _orchestrator = Orchestrator()
@@ -157,3 +158,48 @@ async def session_info(session_id: str):
     if patient_ctx:
         summary = patient_ctx.get("summary", "Patient data loaded.")
     return SessionInfoResponse(**info, patient_summary=summary)
+
+
+# ── Speech-to-text transcription ──
+
+@router.get("/api/transcribe/check")
+async def transcribe_check():
+    """Check if server-side transcription is available."""
+    provider = get_transcription_provider()
+    return {"available": provider is not None, "provider": provider}
+
+
+@router.post("/api/transcribe")
+async def transcribe(
+    file: UploadFile = File(...),
+    language: str | None = Form(None),
+):
+    """Transcribe an audio file using Groq or OpenAI Whisper.
+
+    Accepts audio uploads (webm, ogg, mp3, wav, m4a).
+    Returns {"text": "...", "provider": "groq"|"openai"}.
+    """
+    provider = get_transcription_provider()
+    if not provider:
+        raise HTTPException(
+            503,
+            "No transcription API configured. Set GROQ_API_KEY or OPENAI_API_KEY.",
+        )
+
+    audio_bytes = await file.read()
+    if not audio_bytes:
+        raise HTTPException(400, "Empty audio file")
+
+    # Sanity check: reject files > 25MB (Whisper API limit)
+    if len(audio_bytes) > 25 * 1024 * 1024:
+        raise HTTPException(413, "Audio file too large (max 25MB)")
+
+    try:
+        result = await transcribe_audio(
+            audio_bytes=audio_bytes,
+            filename=file.filename or "audio.webm",
+            language=language,
+        )
+        return result
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))

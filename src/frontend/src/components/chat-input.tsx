@@ -2,8 +2,10 @@
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
-import { ArrowUp, Square, Mic, MicOff } from "lucide-react";
+import { ArrowUp, Square, Mic, MicOff, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100";
 
 const cn = (...classes: (string | undefined | null | false)[]) =>
   classes.filter(Boolean).join(" ");
@@ -29,60 +31,76 @@ const TooltipContent = React.forwardRef<
 ));
 TooltipContent.displayName = "TooltipContent";
 
-/* ---------- Voice Input Hook ---------- */
+/* ---------- Voice Input Hook (dual mode: Web Speech API + MediaRecorder fallback) ---------- */
+
+type VoiceMode = "idle" | "web-speech" | "recorder" | "transcribing";
+
 function useVoiceInput(onTranscript: (text: string) => void) {
   const [isListening, setIsListening] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [interim, setInterim] = useState("");
   const [isSupported, setIsSupported] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
-  // wantListening: true when user toggled ON, false when user toggled OFF.
-  // Distinguishes intentional stop from Chrome's auto-stop (silence timeout).
-  const wantListeningRef = useRef(false);
-  const networkRetryCountRef = useRef(0);
-  const MAX_NETWORK_RETRIES = 2;
+  const [mode, setMode] = useState<VoiceMode>("idle");
 
-  // Detect support after hydration (window unavailable during SSR)
+  // Refs
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const wantListeningRef = useRef(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  // Once Web Speech API fails with "network", permanently switch to recorder mode
+  const webSpeechBrokenRef = useRef(false);
+  // Whether the backend transcription endpoint is available
+  const backendAvailableRef = useRef<boolean | null>(null);
+
+  // ── Check support on mount ──
   useEffect(() => {
     const hasSR =
       "SpeechRecognition" in window || "webkitSpeechRecognition" in window;
-    // SpeechRecognition also requires a secure context (HTTPS or localhost)
-    const isSecure =
-      window.isSecureContext ||
-      location.hostname === "localhost" ||
-      location.hostname === "127.0.0.1";
-    setIsSupported(hasSR && isSecure);
-    if (hasSR && !isSecure) {
-      console.warn(
-        "[Voice] SpeechRecognition requires HTTPS or localhost. Current origin:",
-        location.origin
-      );
+    const hasRecorder = typeof MediaRecorder !== "undefined";
+    const hasMic = !!navigator.mediaDevices?.getUserMedia;
+
+    // Check backend transcription availability
+    fetch(`${API_URL}/api/transcribe/check`)
+      .then((r) => r.json())
+      .then((data) => {
+        backendAvailableRef.current = !!data.available;
+        // If backend available OR Web Speech API available → supported
+        setIsSupported(data.available || hasSR);
+        if (data.available) {
+          console.log("[Voice] Backend transcription available via", data.provider);
+        }
+      })
+      .catch(() => {
+        backendAvailableRef.current = false;
+        setIsSupported(hasSR);
+      });
+
+    // If no microphone API at all, not supported
+    if (!hasMic && !hasSR) {
+      setIsSupported(false);
     }
   }, []);
 
-  const createRecognition = useCallback(() => {
+  // ── Web Speech API start ──
+  const startWebSpeech = useCallback(() => {
+    if (recognitionRef.current) return;
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+
+    wantListeningRef.current = true;
     const recognition = new SR();
     recognition.continuous = true;
     recognition.interimResults = true;
-    // Use browser locale — empty string causes Chrome to error immediately
     recognition.lang = navigator.language || "en-US";
-    return recognition;
-  }, []);
 
-  const start = useCallback(() => {
-    if (!isSupported || recognitionRef.current) return;
-    wantListeningRef.current = true;
-    networkRetryCountRef.current = 0;
-    setError(null);
-
-    const recognition = createRecognition();
     let finalTranscript = "";
 
     recognition.addEventListener("start", () => {
       setIsListening(true);
+      setMode("web-speech");
       setError(null);
-      networkRetryCountRef.current = 0; // reset on successful start
     });
 
     recognition.addEventListener("result", (event) => {
@@ -106,79 +124,49 @@ function useVoiceInput(onTranscript: (text: string) => void) {
     recognition.addEventListener("error", (event) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const errCode = (event as any).error as string | undefined;
-      // "aborted" = user stopped; "no-speech" = silence timeout — both normal
       if (errCode === "aborted" || errCode === "no-speech") return;
 
-      // "network" = can't reach Google speech servers — retry a couple of times
       if (errCode === "network") {
-        networkRetryCountRef.current += 1;
-        if (
-          networkRetryCountRef.current <= MAX_NETWORK_RETRIES &&
-          wantListeningRef.current
-        ) {
-          console.warn(
-            `[Voice] Network error, retrying (${networkRetryCountRef.current}/${MAX_NETWORK_RETRIES})...`
-          );
-          // The "end" event fires after error — the restart happens there
-          return;
-        }
-        // Exhausted retries
-        console.warn("[Voice] Network error persists after retries");
-        setError(
-          location.protocol === "https:" || location.hostname === "localhost"
-            ? "Could not reach speech service — check your internet connection"
-            : "Voice input requires HTTPS. Access via localhost or enable HTTPS."
-        );
+        console.warn("[Voice] Web Speech API network error — switching to recorder mode");
+        webSpeechBrokenRef.current = true;
         wantListeningRef.current = false;
         recognitionRef.current = null;
         setIsListening(false);
         setInterim("");
+        setMode("idle");
+        // Auto-switch: start recorder if backend is available
+        if (backendAvailableRef.current) {
+          // Small delay to let cleanup finish
+          setTimeout(() => startRecorder(), 100);
+        } else {
+          setError("Voice transcription unavailable — set GROQ_API_KEY on the server");
+        }
         return;
       }
 
-      // "not-allowed" = mic permission denied
       if (errCode === "not-allowed" || errCode === "service-not-allowed") {
         setError("Microphone access denied — check browser permissions");
       } else {
         setError(`Voice error: ${errCode}`);
       }
-      console.warn("[Voice] SpeechRecognition error:", errCode);
       wantListeningRef.current = false;
       recognitionRef.current = null;
       setIsListening(false);
       setInterim("");
+      setMode("idle");
     });
 
     recognition.addEventListener("end", () => {
-      // Chrome auto-stops continuous recognition after ~5-10s of silence.
-      // If the user still wants to listen, auto-restart silently.
-      if (wantListeningRef.current) {
+      if (wantListeningRef.current && !webSpeechBrokenRef.current) {
         try {
-          // Small delay before retry on network errors to avoid tight loop
-          const delay = networkRetryCountRef.current > 0 ? 500 : 0;
-          if (delay > 0) {
-            setTimeout(() => {
-              if (!wantListeningRef.current) return;
-              try {
-                recognition.start();
-              } catch {
-                wantListeningRef.current = false;
-                recognitionRef.current = null;
-                setIsListening(false);
-                setInterim("");
-              }
-            }, delay);
-          } else {
-            recognition.start();
-          }
-          return; // keep isListening true
-        } catch {
-          // If restart fails (e.g., mic revoked), give up
-        }
+          recognition.start();
+          return;
+        } catch { /* give up */ }
       }
       recognitionRef.current = null;
       setIsListening(false);
       setInterim("");
+      setMode("idle");
     });
 
     recognitionRef.current = recognition;
@@ -188,30 +176,171 @@ function useVoiceInput(onTranscript: (text: string) => void) {
       wantListeningRef.current = false;
       recognitionRef.current = null;
     }
-  }, [isSupported, onTranscript, createRecognition]);
+  }, [onTranscript]);
 
+  // ── MediaRecorder start (fallback) ──
+  const startRecorder = useCallback(async () => {
+    if (mediaRecorderRef.current) return;
+    setError(null);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+
+      // Pick a supported mime type
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+          ? "audio/webm"
+          : "audio/ogg";
+
+      const recorder = new MediaRecorder(stream, { mimeType });
+      chunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        // Stop mic stream
+        stream.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        mediaRecorderRef.current = null;
+
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        chunksRef.current = [];
+
+        if (blob.size < 100) {
+          setIsListening(false);
+          setMode("idle");
+          return;
+        }
+
+        // Send to backend for transcription
+        setIsTranscribing(true);
+        setMode("transcribing");
+        setInterim("Transcribing...");
+
+        try {
+          const lang = navigator.language?.split("-")[0] || undefined;
+          const form = new FormData();
+          const ext = mimeType.includes("webm") ? "webm" : "ogg";
+          form.append("file", blob, `recording.${ext}`);
+          if (lang) form.append("language", lang);
+
+          const resp = await fetch(`${API_URL}/api/transcribe`, {
+            method: "POST",
+            body: form,
+          });
+
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => ({ detail: resp.statusText }));
+            throw new Error(errData.detail || `HTTP ${resp.status}`);
+          }
+
+          const data = await resp.json();
+          if (data.text && data.text.trim()) {
+            onTranscript(data.text.trim());
+          }
+        } catch (e) {
+          console.error("[Voice] Transcription failed:", e);
+          setError(`Transcription failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+        } finally {
+          setIsTranscribing(false);
+          setIsListening(false);
+          setInterim("");
+          setMode("idle");
+        }
+      };
+
+      recorder.onerror = () => {
+        setError("Recording failed");
+        stream.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        mediaRecorderRef.current = null;
+        setIsListening(false);
+        setMode("idle");
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start(1000); // collect data every 1s
+      setIsListening(true);
+      setMode("recorder");
+      setInterim("Recording... click mic to stop");
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "NotAllowedError") {
+        setError("Microphone access denied — check browser permissions");
+      } else {
+        setError(`Could not access microphone: ${e instanceof Error ? e.message : "Unknown"}`);
+      }
+    }
+  }, [onTranscript]);
+
+  // ── Stop ──
   const stop = useCallback(() => {
-    wantListeningRef.current = false; // signal onend NOT to restart
+    wantListeningRef.current = false;
+
+    // Stop Web Speech API
     const rec = recognitionRef.current;
     recognitionRef.current = null;
     if (rec) {
       try { rec.stop(); } catch { /* ignore */ }
     }
+
+    // Stop MediaRecorder (triggers onstop → transcription)
+    const mr = mediaRecorderRef.current;
+    if (mr && mr.state !== "inactive") {
+      try { mr.stop(); } catch { /* ignore */ }
+      // Don't clear isListening here — onstop handler will after transcription
+      return;
+    }
+
+    // Stop raw stream if lingering
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+
     setIsListening(false);
     setInterim("");
+    setMode("idle");
   }, []);
 
+  // ── Toggle ──
   const toggle = useCallback(() => {
-    if (isListening) {
+    if (isListening || isTranscribing) {
       stop();
-    } else {
-      start();
+      return;
     }
-  }, [isListening, start, stop]);
+
+    setError(null);
+
+    // If Web Speech API previously failed with network, go straight to recorder
+    if (webSpeechBrokenRef.current) {
+      if (backendAvailableRef.current) {
+        startRecorder();
+      } else {
+        setError("Voice transcription unavailable — set GROQ_API_KEY on the server");
+      }
+      return;
+    }
+
+    // Try Web Speech API first
+    const hasSR =
+      typeof window !== "undefined" &&
+      ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
+    if (hasSR) {
+      startWebSpeech();
+    } else if (backendAvailableRef.current) {
+      startRecorder();
+    } else {
+      setError("Voice input not available in this browser");
+    }
+  }, [isListening, isTranscribing, stop, startWebSpeech, startRecorder]);
 
   const clearError = useCallback(() => setError(null), []);
 
-  // Cleanup on unmount
+  // ── Cleanup on unmount ──
   useEffect(() => {
     return () => {
       wantListeningRef.current = false;
@@ -220,10 +349,29 @@ function useVoiceInput(onTranscript: (text: string) => void) {
       if (rec) {
         try { rec.stop(); } catch { /* ignore */ }
       }
+      const mr = mediaRecorderRef.current;
+      mediaRecorderRef.current = null;
+      if (mr && mr.state !== "inactive") {
+        try { mr.stop(); } catch { /* ignore */ }
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
     };
   }, []);
 
-  return { isListening, interim, isSupported, error, toggle, stop, clearError };
+  return {
+    isListening,
+    isTranscribing,
+    interim,
+    isSupported,
+    error,
+    mode,
+    toggle,
+    stop,
+    clearError,
+  };
 }
 
 /* ---------- ChatInput ---------- */
@@ -303,19 +451,23 @@ export function ChatInput({
             <TooltipTrigger asChild>
               <motion.button
                 onClick={voice.toggle}
-                disabled={isLoading}
+                disabled={isLoading || voice.isTranscribing}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 className={cn(
                   "h-9 w-9 shrink-0 mb-1 rounded-full inline-flex items-center justify-center",
                   "transition-all duration-200 focus-visible:outline-none",
                   "disabled:pointer-events-none disabled:opacity-50",
-                  voice.isListening
-                    ? "bg-red-500/20 text-red-400 animate-pulse"
-                    : "bg-transparent text-[#9CA3AF] hover:text-gray-200"
+                  voice.isTranscribing
+                    ? "bg-amber-500/20 text-amber-400"
+                    : voice.isListening
+                      ? "bg-red-500/20 text-red-400 animate-pulse"
+                      : "bg-transparent text-[#9CA3AF] hover:text-gray-200"
                 )}
               >
-                {voice.isListening ? (
+                {voice.isTranscribing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : voice.isListening ? (
                   <MicOff className="h-4 w-4" />
                 ) : (
                   <Mic className="h-4 w-4" />
@@ -323,7 +475,11 @@ export function ChatInput({
               </motion.button>
             </TooltipTrigger>
             <TooltipContent side="top">
-              {voice.isListening ? "Stop recording" : "Voice input"}
+              {voice.isTranscribing
+                ? "Transcribing..."
+                : voice.isListening
+                  ? "Stop recording"
+                  : "Voice input"}
             </TooltipContent>
           </Tooltip>
         )}

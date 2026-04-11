@@ -5,4 +5,5 @@ redis[hiredis]==5.2.1
 httpx==0.28.1
 pydantic==2.10.4
 python-dotenv==1.0.1
+python-multipart==0.0.20
 sse-starlette==2.2.1
