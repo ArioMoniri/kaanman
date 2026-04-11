@@ -115,13 +115,13 @@ function RingGauge({
           strokeDashoffset={circumference * 0.25}
           style={{ transition: "stroke-dasharray 0.8s ease" }}
         />
-        {/* Score text — uses same gradient as the ring arc */}
+        {/* Score text — direct color fill for cross-browser reliability */}
         <text
           x={cx}
           y={cy + 1}
           textAnchor="middle"
           dominantBaseline="middle"
-          fill={`url(#${gradId})`}
+          fill={color}
           fontSize="13"
           fontWeight="700"
           fontFamily="var(--font-manrope)"
@@ -155,7 +155,7 @@ export function TrustGauges({ scores, reasons, scorerConfidence }: TrustGaugesPr
 
   return (
     <div className="flex-1 min-w-[240px]">
-      {/* Overall score header */}
+      {/* Overall score header with confidence gauge */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="text-2xl font-bold" style={{ color: overallColor }}>
@@ -165,9 +165,34 @@ export function TrustGauges({ scores, reasons, scorerConfidence }: TrustGaugesPr
             Trust Score
           </span>
         </div>
-        <span className="text-[10px] text-gray-600 font-medium">
-          Confidence: {scorerConfidence}%
-        </span>
+        {/* Confidence as a compact ring gauge */}
+        <div className="flex items-center gap-1.5">
+          <svg width="32" height="32" viewBox="0 0 32 32">
+            <defs>
+              <linearGradient id="ring-confidence" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor={getGradient(scorerConfidence)[0]} />
+                <stop offset="100%" stopColor={getGradient(scorerConfidence)[1]} />
+              </linearGradient>
+            </defs>
+            <circle cx="16" cy="16" r="12" fill="none" stroke="#2A2A2E" strokeWidth="3" />
+            <circle
+              cx="16" cy="16" r="12" fill="none"
+              stroke="url(#ring-confidence)"
+              strokeWidth="3" strokeLinecap="round"
+              strokeDasharray={`${(scorerConfidence / 100) * 2 * Math.PI * 12} ${2 * Math.PI * 12 * (1 - scorerConfidence / 100)}`}
+              strokeDashoffset={2 * Math.PI * 12 * 0.25}
+              style={{ transition: "stroke-dasharray 0.8s ease" }}
+            />
+            <text x="16" y="17" textAnchor="middle" dominantBaseline="middle"
+              fill={getColor(scorerConfidence)} fontSize="8" fontWeight="700"
+              fontFamily="var(--font-manrope)">
+              {scorerConfidence}
+            </text>
+          </svg>
+          <span className="text-[10px] font-medium" style={{ color: getColor(scorerConfidence) }}>
+            Conf.
+          </span>
+        </div>
       </div>
 
       {/* Ring gauges grid */}

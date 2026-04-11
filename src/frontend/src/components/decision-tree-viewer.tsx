@@ -147,15 +147,17 @@ export function DecisionTreeViewer({ title, nodes, edges, onClose }: DecisionTre
       {/* Drag handle on right edge — visible grip dots */}
       <div
         onMouseDown={handleMouseDown}
-        className="w-3 h-full cursor-col-resize hover:bg-accent/20 active:bg-accent/40 transition-colors border-r border-border/40 shrink-0 flex items-center justify-center group"
+        className="w-4 h-full cursor-col-resize bg-[#1a1a1e] hover:bg-accent/20 active:bg-accent/40 transition-colors border-r border-border/40 shrink-0 flex items-center justify-center group"
         style={{ touchAction: "none" }}
       >
-        <div className="flex flex-col items-center gap-1.5 opacity-60 group-hover:opacity-100 transition-opacity">
-          <div className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-accent" />
-          <div className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-accent" />
-          <div className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-accent" />
-          <div className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-accent" />
-          <div className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-accent" />
+        <div className="flex flex-col items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+          <div className="w-1 h-1 rounded-full bg-gray-500 group-hover:bg-accent" />
+          <div className="w-1 h-1 rounded-full bg-gray-500 group-hover:bg-accent" />
+          <div className="w-1 h-1 rounded-full bg-gray-500 group-hover:bg-accent" />
+          <div className="w-1 h-1 rounded-full bg-gray-500 group-hover:bg-accent" />
+          <div className="w-1 h-1 rounded-full bg-gray-500 group-hover:bg-accent" />
+          <div className="w-1 h-1 rounded-full bg-gray-500 group-hover:bg-accent" />
+          <div className="w-1 h-1 rounded-full bg-gray-500 group-hover:bg-accent" />
         </div>
       </div>
     </div>
