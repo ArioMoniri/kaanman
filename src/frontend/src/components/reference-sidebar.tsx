@@ -10,6 +10,9 @@ interface Citation {
   year?: number;
   url?: string;
   quote: string;
+  importance?: "high" | "medium" | "low";
+  effect_size?: "large" | "moderate" | "small" | "none";
+  evidence_level?: string;
 }
 
 interface Guideline {
@@ -201,10 +204,14 @@ export function ReferenceSidebar({ citations, guidelines, onClose, initialUrl, i
     ...citations.filter((c) => c.url).map((c) => ({
       url: c.url!, label: `[${c.index}] ${c.source}`, title: c.title,
       country: c.country, year: c.year,
+      importance: c.importance, effect_size: c.effect_size, evidence_level: c.evidence_level,
     })),
     ...guidelines.filter((g) => g.url).map((g) => ({
       url: g.url!, label: g.source, title: g.title,
       country: g.country, year: g.year,
+      importance: undefined as "high" | "medium" | "low" | undefined,
+      effect_size: undefined as "large" | "moderate" | "small" | "none" | undefined,
+      evidence_level: undefined as string | undefined,
     })),
   ];
 
@@ -247,7 +254,7 @@ export function ReferenceSidebar({ citations, guidelines, onClose, initialUrl, i
               activeUrl === ref.url ? "bg-surface-light border-l-2 border-l-accent" : ""
             }`}
           >
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <span className="px-1 py-0 rounded bg-accent/10 text-accent/70 text-[9px] font-semibold shrink-0">
                 {COUNTRY_LABELS[ref.country] || ref.country}
               </span>
@@ -256,6 +263,29 @@ export function ReferenceSidebar({ citations, guidelines, onClose, initialUrl, i
               </span>
               {ref.year && (
                 <span className="text-[10px] text-gray-500 shrink-0">{ref.year}</span>
+              )}
+              {ref.importance && (
+                <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
+                  ref.importance === "high" ? "bg-green-500/15 text-green-400 border border-green-500/30" :
+                  ref.importance === "medium" ? "bg-blue-500/15 text-blue-400 border border-blue-500/30" :
+                  "bg-gray-500/15 text-gray-400 border border-gray-500/30"
+                }`}>
+                  {ref.importance === "high" ? "High impact" : ref.importance === "medium" ? "Moderate" : "Low"}
+                </span>
+              )}
+              {ref.effect_size && ref.effect_size !== "none" && (
+                <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
+                  ref.effect_size === "large" ? "bg-green-500/15 text-green-400 border border-green-500/30" :
+                  ref.effect_size === "moderate" ? "bg-blue-500/15 text-blue-400 border border-blue-500/30" :
+                  "bg-purple-500/15 text-purple-400 border border-purple-500/30"
+                }`}>
+                  {ref.effect_size} effect
+                </span>
+              )}
+              {ref.evidence_level && (
+                <span className="text-[8px] text-gray-500 font-medium bg-surface/80 px-1.5 py-0.5 rounded shrink-0">
+                  {ref.evidence_level}
+                </span>
               )}
             </div>
             <p className="text-[10px] text-gray-500 mt-0.5 truncate">{ref.title}</p>

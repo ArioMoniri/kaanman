@@ -13,10 +13,11 @@ import { ShimmerText } from "@/components/ui/shimmer-text";
 import { CerebraLinkLogo } from "@/components/ui/cerebralink-logo";
 import { ReportViewer } from "@/components/report-viewer";
 import { TrendMonitor } from "@/components/trend-monitor";
+import { ContextWindowBar } from "@/components/context-window-bar";
 import type { ManifestEntry } from "@/components/reports-knowledge-graph";
 import type { EpisodeEntry } from "@/components/episodes-knowledge-graph";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 /* Resizable sidebar wrapper — drag handle on left edge */
 function ResizableSidebar({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
@@ -402,6 +403,20 @@ export default function Home() {
           fileEndpointType: "episodes",
         });
       }
+    },
+    [],
+  );
+
+  const handleOpenPacsEntry = useCallback(
+    (entry: ManifestEntry) => {
+      // Open report viewer with PACS info — the viewer has PACS link handling built-in
+      setSelectedReport({
+        file: entry.file,
+        textFile: entry.text_file,
+        title: entry.report_name || entry.file,
+        reportId: entry.report_id,
+        accessionNumber: entry.accession_number,
+      });
     },
     [],
   );
@@ -879,6 +894,7 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2">
             <ReferenceLegend />
+            <ContextWindowBar messages={messages} agentStatuses={agentStatuses} />
             {patientData && (
               <button
                 onClick={() => setShowKnowledgeGraph(true)}
@@ -992,24 +1008,62 @@ export default function Home() {
       )}
 
       {/* Knowledge Graph Modal */}
-      {showKnowledgeGraph && patientData && (
-        <KnowledgeGraph
-          patientData={patientData}
-          onClose={() => { setShowKnowledgeGraph(false); setKgFocusLabel(undefined); }}
-          focusLabel={kgFocusLabel}
-          reportManifest={reportManifest || undefined}
-          protocolId={
-            ((patientData as Record<string, unknown>)?.protocol_no as string) ||
-            ((patientData as Record<string, unknown>)?.patient_id as string) ||
-            (((patientData as Record<string, unknown>)?.patient as Record<string, unknown>)?.patient_id as string) ||
-            undefined
-          }
-          pacsAllStudies={pacsAllStudies || undefined}
-          onOpenReport={handleOpenReportEntry}
-          onOpenTrend={handleOpenTrend}
-          episodeManifest={episodeManifest || undefined}
-          onOpenEpisode={handleOpenEpisode}
-        />
+      {showKnowledgeGraph && (
+        patientData ? (
+          <KnowledgeGraph
+            patientData={patientData}
+            onClose={() => { setShowKnowledgeGraph(false); setKgFocusLabel(undefined); }}
+            focusLabel={kgFocusLabel}
+            reportManifest={reportManifest || undefined}
+            protocolId={
+              ((patientData as Record<string, unknown>)?.protocol_no as string) ||
+              ((patientData as Record<string, unknown>)?.patient_id as string) ||
+              (((patientData as Record<string, unknown>)?.patient as Record<string, unknown>)?.patient_id as string) ||
+              undefined
+            }
+            pacsAllStudies={pacsAllStudies || undefined}
+            onOpenReport={handleOpenReportEntry}
+            onOpenPacs={handleOpenPacsEntry}
+            onOpenTrend={handleOpenTrend}
+            episodeManifest={episodeManifest || undefined}
+            onOpenEpisode={handleOpenEpisode}
+          />
+        ) : (
+          /* No patient data — show a placeholder modal */
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-3"
+            style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(4px)" }}
+            onClick={() => { setShowKnowledgeGraph(false); setKgFocusLabel(undefined); }}
+          >
+            <div
+              className="flex flex-col items-center justify-center gap-4 p-10 rounded-2xl"
+              style={{
+                background: "linear-gradient(180deg, #0d0d12, #08080c)",
+                border: "1px solid rgba(255,255,255,0.08)",
+                boxShadow: "0 24px 80px rgba(0,0,0,0.6)",
+                maxWidth: 420,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-16 h-16 rounded-full flex items-center justify-center" style={{ background: "rgba(129,140,248,0.12)", border: "1px solid rgba(129,140,248,0.25)" }}>
+                <span style={{ fontSize: 28 }}>🧠</span>
+              </div>
+              <div className="text-center">
+                <h3 className="text-lg font-bold text-gray-200 mb-1">No Patient Data</h3>
+                <p className="text-sm text-gray-500 leading-relaxed">
+                  Ask a patient-specific question first (e.g., include a protocol number) to load the knowledge graph.
+                </p>
+              </div>
+              <button
+                onClick={() => { setShowKnowledgeGraph(false); setKgFocusLabel(undefined); }}
+                className="px-5 py-2 rounded-lg text-sm font-semibold transition-all"
+                style={{ background: "rgba(129,140,248,0.15)", color: "#a5b4fc", border: "1px solid rgba(129,140,248,0.3)" }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )
       )}
 
       {/* Report Viewer Modal */}

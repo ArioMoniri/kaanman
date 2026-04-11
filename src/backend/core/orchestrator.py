@@ -266,62 +266,77 @@ class Orchestrator:
                     return None, None
 
             try:
+                # return_exceptions=True so one failure doesn't cancel the rest
                 patient_result, reports_result, episodes_result = await asyncio.gather(
                     _fetch_patient_data(),
                     _fetch_reports_data(),
                     _fetch_episodes_data(),
-                    return_exceptions=False,
+                    return_exceptions=True,
                 )
 
-                patient_context = patient_result
-                mem = SessionMemory(session_id)
-                await mem.set_patient_context(patient_context)
-                result.patient_context = patient_context
-
-                # Neo4j: ingest patient history in background (non-blocking)
-                if neo4j_available() and patient_context:
-                    try:
-                        ingest_patient_history(patient_context)
-                    except Exception:
-                        pass  # Graph ingestion is best-effort
-
                 t_fetch = int((time.monotonic() - t0) * 1000)
-                result.agents_used.append("patient_fetch")
-                result.agent_timings.append(AgentTiming(agent="patient_fetch", time_ms=t_fetch))
 
-                await self._emit(on_status, {
-                    "agent": "patient_fetch", "status": "done",
-                    "time_ms": t_fetch, "message": "Patient data loaded & PHI-masked",
-                })
+                # ── Handle patient data result ──
+                if isinstance(patient_result, Exception):
+                    tb = "".join(traceback.format_exception(type(patient_result), patient_result, patient_result.__traceback__))
+                    logging.getLogger("cerebralink.orchestrator").error(
+                        "Patient fetch error for protocol %s:\n%s", detected_pid, tb
+                    )
+                    await self._emit(on_status, {
+                        "agent": "patient_fetch", "status": "error",
+                        "time_ms": t_fetch,
+                        "message": f"Patient fetch failed: {type(patient_result).__name__}: {patient_result}",
+                    })
+                else:
+                    patient_context = patient_result
+                    mem = SessionMemory(session_id)
+                    await mem.set_patient_context(patient_context)
+                    result.patient_context = patient_context
 
-                # Unpack reports result
-                if isinstance(reports_result, tuple):
+                    # Neo4j: ingest patient history in background (non-blocking)
+                    if neo4j_available() and patient_context:
+                        try:
+                            ingest_patient_history(patient_context)
+                        except Exception:
+                            pass  # Graph ingestion is best-effort
+
+                    result.agents_used.append("patient_fetch")
+                    result.agent_timings.append(AgentTiming(agent="patient_fetch", time_ms=t_fetch))
+                    await self._emit(on_status, {
+                        "agent": "patient_fetch", "status": "done",
+                        "time_ms": t_fetch, "message": "Patient data loaded & PHI-masked",
+                    })
+
+                # ── Handle reports result (may be tuple or exception) ──
+                if isinstance(reports_result, Exception):
+                    logging.getLogger("cerebralink.orchestrator").warning(
+                        "Reports fetch failed for %s: %s", detected_pid, reports_result
+                    )
+                elif isinstance(reports_result, tuple):
                     reports_manifest, reports_dir_path = reports_result
-                if reports_manifest:
-                    await self._emit(on_status, {
-                        "agent": "reports_fetch", "status": "done",
-                        "time_ms": t_fetch,
-                        "message": f"Reports loaded: {len(reports_manifest)} reports",
-                    })
+                    if reports_manifest:
+                        await self._emit(on_status, {
+                            "agent": "reports_fetch", "status": "done",
+                            "time_ms": t_fetch,
+                            "message": f"Reports loaded: {len(reports_manifest)} reports",
+                        })
 
-                # Unpack episodes result
-                if isinstance(episodes_result, tuple):
+                # ── Handle episodes result (may be tuple or exception) ──
+                if isinstance(episodes_result, Exception):
+                    logging.getLogger("cerebralink.orchestrator").warning(
+                        "Episodes fetch failed for %s: %s", detected_pid, episodes_result
+                    )
+                elif isinstance(episodes_result, tuple):
                     episodes_manifest, episodes_dir_path = episodes_result
-                if episodes_manifest:
-                    yatis_n = sum(1 for e in episodes_manifest if e.get("is_hospitalization"))
-                    poli_n = len(episodes_manifest) - yatis_n
-                    await self._emit(on_status, {
-                        "agent": "episodes_fetch", "status": "done",
-                        "time_ms": t_fetch,
-                        "message": f"Episodes loaded: {yatis_n} yatış, {poli_n} poliklinik",
-                    })
-            except FileNotFoundError as e:
-                t_fetch = int((time.monotonic() - t0) * 1000)
-                await self._emit(on_status, {
-                    "agent": "patient_fetch", "status": "error",
-                    "time_ms": t_fetch,
-                    "message": f"Patient fetch failed — missing file: {e}",
-                })
+                    if episodes_manifest:
+                        yatis_n = sum(1 for e in episodes_manifest if e.get("is_hospitalization"))
+                        poli_n = len(episodes_manifest) - yatis_n
+                        await self._emit(on_status, {
+                            "agent": "episodes_fetch", "status": "done",
+                            "time_ms": t_fetch,
+                            "message": f"Episodes loaded: {yatis_n} yatış, {poli_n} poliklinik",
+                        })
+
             except Exception as e:
                 t_fetch = int((time.monotonic() - t0) * 1000)
                 tb = traceback.format_exc()

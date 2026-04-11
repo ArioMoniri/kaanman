@@ -65,6 +65,7 @@ interface GraphNodeData {
   pacsCount?: number;
   entries?: ManifestEntry[];
   onOpenReport?: (entry: ManifestEntry) => void;
+  onOpenPacs?: (entry: ManifestEntry) => void;
   [key: string]: unknown;
 }
 
@@ -168,39 +169,68 @@ function ReportNode({ data }: { data: GraphNodeData }) {
       )}
 
       {(pinned || hovered) && data.entries && data.entries.length > 0 && (
-        <div style={{
-          position: "absolute" as const, top: "100%", left: "50%",
-          transform: "translateX(-50%)", marginTop: 8,
-          background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.1)",
-          borderRadius: 8, padding: "8px 12px", fontSize: 10, color: "#d1d5db",
-          minWidth: 220, maxWidth: 340, maxHeight: 260, overflow: "auto",
-          zIndex: 100, boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
-        }}>
-          <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 4, fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: 4 }}>
-            {data.entries.length} reports — click to view
+        <div
+          onClick={(ev) => ev.stopPropagation()}
+          onMouseDown={(ev) => ev.stopPropagation()}
+          style={{
+            position: "absolute" as const, top: "100%", left: "50%",
+            transform: "translateX(-50%)", marginTop: 8,
+            background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 8, padding: "8px 12px", fontSize: 10, color: "#d1d5db",
+            minWidth: 260, maxWidth: 380, maxHeight: 340, overflow: "auto",
+            zIndex: 100, boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+            pointerEvents: "all" as const,
+          }}>
+          <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 4, fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: 4, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span>{data.entries.length} reports — click to view</span>
+            {data.pacsCount && data.pacsCount > 0 && (
+              <span style={{ fontSize: 8, color: "#60a5fa", fontWeight: 600, background: "rgba(96,165,250,0.1)", border: "1px solid rgba(96,165,250,0.2)", padding: "2px 6px", borderRadius: 4 }}>
+                {data.pacsCount} PACS
+              </span>
+            )}
           </div>
-          {data.entries.slice(0, 15).map((e, i) => (
+          {data.entries.slice(0, 20).map((e, i) => (
             <div key={i}
-              onClick={(ev) => { ev.stopPropagation(); if (data.onOpenReport) data.onOpenReport(e); }}
               style={{
-                padding: "4px 6px", borderBottom: i < 14 ? "1px solid rgba(255,255,255,0.04)" : "none",
-                cursor: "pointer", borderRadius: 4, transition: "background 0.15s",
+                padding: "4px 6px", borderBottom: i < 19 ? "1px solid rgba(255,255,255,0.04)" : "none",
+                borderRadius: 4,
               }}
-              onMouseEnter={(ev) => { (ev.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.06)"; }}
-              onMouseLeave={(ev) => { (ev.currentTarget as HTMLDivElement).style.background = "transparent"; }}
             >
-              <div style={{ fontWeight: 600, color: palette.text, display: "flex", alignItems: "center", gap: 4 }}>
-                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.report_name}</span>
-                {e.accession_number && (
-                  <span style={{ fontSize: 8, color: "#60a5fa", fontWeight: 400, background: "rgba(96,165,250,0.1)", padding: "1px 4px", borderRadius: 3, flexShrink: 0 }}>PACS</span>
-                )}
-                <span style={{ fontSize: 9, color: "#818cf8", flexShrink: 0 }}>&rarr;</span>
+              <div
+                onClick={(ev) => { ev.stopPropagation(); if (data.onOpenReport) data.onOpenReport(e); }}
+                style={{ cursor: "pointer", transition: "background 0.15s", borderRadius: 4, padding: "3px 6px" }}
+                onMouseEnter={(ev) => { (ev.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.06)"; }}
+                onMouseLeave={(ev) => { (ev.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+              >
+                <div style={{ fontWeight: 600, color: palette.text, display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.report_name}</span>
+                  <span style={{ fontSize: 9, color: "#818cf8", flexShrink: 0 }}>&rarr;</span>
+                </div>
+                <div style={{ color: "#6b7280", fontSize: 9 }}>{e.date} &middot; {e.facility}</div>
               </div>
-              <div style={{ color: "#6b7280", fontSize: 9 }}>{e.date} &middot; {e.facility}</div>
+              {e.accession_number && (
+                <div style={{ display: "flex", gap: 4, marginTop: 2, paddingLeft: 4 }}>
+                  <button
+                    onClick={(ev) => { ev.stopPropagation(); if (data.onOpenPacs) data.onOpenPacs(e); }}
+                    style={{
+                      fontSize: 8, color: "#60a5fa", fontWeight: 600,
+                      background: "rgba(96,165,250,0.1)", border: "1px solid rgba(96,165,250,0.2)",
+                      padding: "2px 8px", borderRadius: 4, cursor: "pointer",
+                      transition: "all 0.15s", display: "flex", alignItems: "center", gap: 3,
+                    }}
+                    onMouseEnter={(ev) => { (ev.currentTarget as HTMLButtonElement).style.background = "rgba(96,165,250,0.25)"; }}
+                    onMouseLeave={(ev) => { (ev.currentTarget as HTMLButtonElement).style.background = "rgba(96,165,250,0.1)"; }}
+                    title={`Open PACS (Acc: ${e.accession_number})`}
+                  >
+                    <span>PACS</span>
+                    <span style={{ fontSize: 7, opacity: 0.7 }}>{e.accession_number}</span>
+                  </button>
+                </div>
+              )}
             </div>
           ))}
-          {data.entries.length > 15 && (
-            <div style={{ color: "#6b7280", marginTop: 4, fontSize: 9 }}>+{data.entries.length - 15} more...</div>
+          {data.entries.length > 20 && (
+            <div style={{ color: "#6b7280", marginTop: 4, fontSize: 9 }}>+{data.entries.length - 20} more...</div>
           )}
         </div>
       )}
@@ -214,7 +244,7 @@ const nodeTypes = { reportNode: ReportNode };
 /*  Build graph from manifest                                          */
 /* ------------------------------------------------------------------ */
 
-function buildGraph(manifest: ManifestEntry[], onOpenReport?: (entry: ManifestEntry) => void): { nodes: Node<GraphNodeData>[]; edges: Edge[] } {
+function buildGraph(manifest: ManifestEntry[], onOpenReport?: (entry: ManifestEntry) => void, onOpenPacs?: (entry: ManifestEntry) => void): { nodes: Node<GraphNodeData>[]; edges: Edge[] } {
   const groups: Record<string, ManifestEntry[]> = {};
   for (const entry of manifest) {
     const cat = categorize(entry.report_type, entry.report_type_swc);
@@ -263,6 +293,7 @@ function buildGraph(manifest: ManifestEntry[], onOpenReport?: (entry: ManifestEn
         pacsCount: pacsCount || undefined,
         entries,
         onOpenReport,
+        onOpenPacs,
       },
     });
 
@@ -305,6 +336,7 @@ function buildGraph(manifest: ManifestEntry[], onOpenReport?: (entry: ManifestEn
               pacsCount: subPacs || undefined,
               entries: groupEntries,
               onOpenReport,
+              onOpenPacs,
             },
           });
 
@@ -323,11 +355,102 @@ function buildGraph(manifest: ManifestEntry[], onOpenReport?: (entry: ManifestEn
 }
 
 /* ------------------------------------------------------------------ */
+/*  PACS quick-access panel                                            */
+/* ------------------------------------------------------------------ */
+
+function PacsPanel({ entries, pacsAllStudies, onOpenPacs }: {
+  entries: ManifestEntry[];
+  pacsAllStudies?: string;
+  onOpenPacs?: (entry: ManifestEntry) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div
+      style={{
+        position: "absolute", top: 12, right: 12,
+        background: "rgba(10,10,20,0.95)", backdropFilter: "blur(12px)",
+        border: "1px solid rgba(96,165,250,0.2)", borderRadius: 12,
+        padding: "8px 12px", zIndex: 30, pointerEvents: "all",
+        maxWidth: 360, boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+      }}
+    >
+      <div
+        onClick={() => setExpanded(!expanded)}
+        style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+      >
+        <span style={{ fontSize: 12 }}>🏥</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#60a5fa" }}>
+          PACS ({entries.length})
+        </span>
+        <span style={{ fontSize: 9, color: "#6b7280", marginLeft: "auto" }}>
+          {expanded ? "▲" : "▼"}
+        </span>
+      </div>
+
+      {pacsAllStudies && (
+        <a
+          href={pacsAllStudies}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: "block", marginTop: 6, fontSize: 9, fontWeight: 600,
+            color: "#34d399", background: "rgba(52,211,153,0.1)",
+            border: "1px solid rgba(52,211,153,0.2)", borderRadius: 6,
+            padding: "4px 8px", textAlign: "center", textDecoration: "none",
+            transition: "all 0.15s",
+          }}
+        >
+          View All Studies in PACS ↗
+        </a>
+      )}
+
+      {expanded && (
+        <div style={{ marginTop: 6, maxHeight: 280, overflowY: "auto" }}>
+          {entries.map((e, i) => (
+            <div
+              key={i}
+              style={{
+                padding: "4px 6px",
+                borderBottom: i < entries.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#d1d5db", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {e.report_name}
+                  </div>
+                  <div style={{ fontSize: 9, color: "#6b7280" }}>{e.date}</div>
+                </div>
+                <button
+                  onClick={(ev) => { ev.stopPropagation(); if (onOpenPacs) onOpenPacs(e); }}
+                  style={{
+                    fontSize: 8, color: "#60a5fa", fontWeight: 600,
+                    background: "rgba(96,165,250,0.1)", border: "1px solid rgba(96,165,250,0.2)",
+                    padding: "3px 8px", borderRadius: 4, cursor: "pointer",
+                    transition: "all 0.15s", flexShrink: 0,
+                  }}
+                  onMouseEnter={(ev) => { (ev.currentTarget as HTMLButtonElement).style.background = "rgba(96,165,250,0.25)"; }}
+                  onMouseLeave={(ev) => { (ev.currentTarget as HTMLButtonElement).style.background = "rgba(96,165,250,0.1)"; }}
+                  title={`Open PACS (Acc: ${e.accession_number})`}
+                >
+                  PACS ↗
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Main component                                                     */
 /* ------------------------------------------------------------------ */
 
 function ReportsKnowledgeGraphInner({ manifest, protocolId, pacsAllStudies, onClose, onOpenReport, onOpenPacs, focusLabel }: ReportsKnowledgeGraphProps) {
-  const { nodes: initialNodes, edges } = useMemo(() => buildGraph(manifest, onOpenReport), [manifest, onOpenReport]);
+  const { nodes: initialNodes, edges } = useMemo(() => buildGraph(manifest, onOpenReport, onOpenPacs), [manifest, onOpenReport, onOpenPacs]);
   const [nodes, setNodes] = useState(initialNodes);
   const reactFlowInstance = useReactFlow();
 
@@ -336,14 +459,13 @@ function ReportsKnowledgeGraphInner({ manifest, protocolId, pacsAllStudies, onCl
     [],
   );
 
+  // Node click is handled inside ReportNode (pin tooltip) — don't auto-open first report
+  // so the dropdown stays visible and users can click individual reports / PACS links
   const handleNodeClick = useCallback(
-    (_: React.MouseEvent, node: Node) => {
-      const data = node.data as GraphNodeData;
-      if (data.entries && data.entries.length > 0 && onOpenReport) {
-        onOpenReport(data.entries[0]);
-      }
+    (_: React.MouseEvent, _node: Node) => {
+      // Intentionally empty — tooltip pinning handled inside ReportNode
     },
-    [onOpenReport],
+    [],
   );
 
   // Auto-zoom to focused node (from deep links) — zoom inside canvas, not the whole popup
@@ -366,6 +488,9 @@ function ReportsKnowledgeGraphInner({ manifest, protocolId, pacsAllStudies, onCl
       }, 500);
     }
   }, [focusLabel, nodes, reactFlowInstance]);
+
+  // Collect all PACS entries for the "View All PACS" button
+  const allPacsEntries = useMemo(() => manifest.filter((e) => e.accession_number), [manifest]);
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
@@ -390,6 +515,11 @@ function ReportsKnowledgeGraphInner({ manifest, protocolId, pacsAllStudies, onCl
           maskColor="rgba(0,0,0,0.7)"
         />
       </ReactFlow>
+
+      {/* PACS quick access panel */}
+      {allPacsEntries.length > 0 && (
+        <PacsPanel entries={allPacsEntries} pacsAllStudies={pacsAllStudies} onOpenPacs={onOpenPacs} />
+      )}
     </div>
   );
 }

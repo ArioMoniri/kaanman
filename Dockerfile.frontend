@@ -2,6 +2,12 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Backend URL for Next.js rewrite proxy — set at build time
+ARG BACKEND_URL=http://backend:8000
+ENV BACKEND_URL=${BACKEND_URL}
+# Empty = same origin, API proxied through Next.js rewrites
+ENV NEXT_PUBLIC_API_URL=
+
 COPY src/frontend/package.json src/frontend/package-lock.json* ./
 RUN npm install
 

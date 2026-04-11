@@ -1,11 +1,14 @@
 """Cerebral Plus integration — ingest patient data from cookies.json.
 
 Wraps cerebral_cookie_from_json.py and cerebral_fetch.py as Python calls.
+Caches patient data to DATA_DIR so subsequent queries skip the HBYS fetch.
 """
 
 from __future__ import annotations
 
 import json
+import logging
+import os
 import re
 import subprocess
 import sys
@@ -14,6 +17,10 @@ from typing import Any
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
 COOKIES_DIR = Path(__file__).resolve().parents[3] / "cookies"
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DATA_DIR = Path(os.environ.get("PATIENT_DATA_DIR", str(PROJECT_ROOT)))
+
+log = logging.getLogger("cerebralink.cerebral")
 
 
 async def ingest_cookies_json(cookies_json_str: str) -> dict[str, Any]:
@@ -43,6 +50,35 @@ async def ingest_cookies_json(cookies_json_str: str) -> dict[str, Any]:
 def _normalize_protocol_id(pid: str) -> str:
     """Strip spaces/dashes from protocol IDs: '7021 4897' → '70214897'."""
     return re.sub(r"[\s\-]+", "", pid.strip())
+
+
+def _patient_cache_path(protocol_id: str) -> Path:
+    """Path to cached patient data JSON."""
+    return DATA_DIR / f"patient_{protocol_id}.json"
+
+
+def patient_exists(protocol_id: str) -> bool:
+    """Check if patient data is cached on disk."""
+    protocol_id = _normalize_protocol_id(protocol_id)
+    return _patient_cache_path(protocol_id).exists()
+
+
+def load_cached_patient(protocol_id: str) -> dict[str, Any]:
+    """Load cached patient data from disk."""
+    protocol_id = _normalize_protocol_id(protocol_id)
+    path = _patient_cache_path(protocol_id)
+    with open(path, "r", encoding="utf-8") as f:
+        return json.loads(f.read())
+
+
+def _save_patient_cache(protocol_id: str, data: dict[str, Any]) -> None:
+    """Save patient data to disk cache."""
+    protocol_id = _normalize_protocol_id(protocol_id)
+    path = _patient_cache_path(protocol_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    log.info("Cached patient data for %s → %s", protocol_id, path)
 
 
 async def fetch_patient(patient_id: str, cookie_string: str) -> dict[str, Any]:
@@ -125,8 +161,17 @@ async def auto_fetch_patient(protocol_id: str) -> dict[str, Any]:
     This is the main entry point when a doctor types a protocol number
     in the chat (e.g., "73524705 bu hastaya atenolol baslayabilir miyim").
     Accepts both '73524705' and '7352 4705' formats.
+
+    Uses disk cache: if patient data was previously fetched, returns it
+    immediately without hitting the hospital HBYS system.
     """
     protocol_id = _normalize_protocol_id(protocol_id)
+
+    # ── Cache check: skip HBYS if we already have data ──
+    if patient_exists(protocol_id):
+        log.info("Using cached patient data for %s", protocol_id)
+        return load_cached_patient(protocol_id)
+
     cookies_file = COOKIES_DIR / "cookies.json"
     if not cookies_file.exists():
         raise FileNotFoundError(
@@ -140,7 +185,15 @@ async def auto_fetch_patient(protocol_id: str) -> dict[str, Any]:
     result = await ingest_cookies_json(cookies_json)
     cookie_string = result["cookie_string"]
 
-    return await fetch_patient(protocol_id, cookie_string)
+    data = await fetch_patient(protocol_id, cookie_string)
+
+    # ── Cache the fetched data for next time ──
+    try:
+        _save_patient_cache(protocol_id, data)
+    except Exception as e:
+        log.warning("Failed to cache patient data for %s: %s", protocol_id, e)
+
+    return data
 
 
 async def load_patient_from_file(path: str) -> dict[str, Any]:

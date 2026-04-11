@@ -588,7 +588,7 @@ function EpLegend({ hiddenCategories, onToggleCategory }: {
       flexDirection: "column", gap: 4, background: "linear-gradient(180deg, rgba(13,13,18,0.95), rgba(8,8,12,0.95))",
       backdropFilter: "blur(16px)", borderRadius: 14, padding: "12px 14px",
       border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-      zIndex: 10,
+      zIndex: 30, pointerEvents: "all",
     }}>
       <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, marginBottom: 2, paddingLeft: 2 }}>
         Filter Categories
@@ -641,7 +641,7 @@ function EpStatsBar({ episodes }: { episodes: EpisodeEntry[] }) {
       position: "absolute", top: 12, right: 12, display: "flex", gap: 2,
       background: "rgba(10,10,14,0.9)", backdropFilter: "blur(12px)",
       borderRadius: 12, padding: "6px 4px", border: "1px solid rgba(255,255,255,0.08)",
-      zIndex: 10,
+      zIndex: 30, pointerEvents: "all",
     }}>
       {stats.map(({ label, value, color }) => (
         <div key={label} style={{ textAlign: "center", padding: "4px 14px", borderRadius: 8 }}>

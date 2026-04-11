@@ -82,7 +82,10 @@ services:
     ports:
       - "3100:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8100
+      # Empty = same origin, API proxied via Next.js rewrites
+      - NEXT_PUBLIC_API_URL=
+      # Backend URL for Next.js rewrite proxy (container-to-container)
+      - BACKEND_URL=http://backend:8000
     depends_on:
       backend:
         condition: service_healthy

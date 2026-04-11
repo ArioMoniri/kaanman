@@ -594,8 +594,9 @@ function markdownComponents(
       // Handle knowledge-graph deep links (#kg-category-label)
       const kgMatch = href?.match(/^#kg-([^-]+)-(.+)$/);
       if (kgMatch) {
-        const category = decodeURIComponent(kgMatch[1]);
-        const label = decodeURIComponent(kgMatch[2]);
+        let category: string, label: string;
+        try { category = decodeURIComponent(kgMatch[1]); } catch { category = kgMatch[1]; }
+        try { label = decodeURIComponent(kgMatch[2]); } catch { label = kgMatch[2]; }
         const colors = ENTITY_COLORS[category] || ENTITY_COLORS.episode;
         const tipMap: Record<string, string> = {
           diagnosis: `Diagnosis: "${label}" — View in Knowledge Graph`,

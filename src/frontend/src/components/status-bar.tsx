@@ -37,9 +37,15 @@ interface StatusBarProps {
 const AGENT_LABELS: Record<string, string> = {
   router: "Query Router",
   patient_fetch: "Patient Data Fetch",
+  reports_fetch: "Reports Fetch",
+  episodes_fetch: "Episodes Fetch",
+  reports_index: "Reports Indexing",
+  episodes_index: "Episodes Indexing",
   clinical: "Clinical Analysis",
   research: "Guideline Research",
   drug: "Drug Interaction Check",
+  reports: "Reports Analysis",
+  episodes: "Episodes Analysis",
   composer_fast: "Fast Answer Composer",
   composer_complete: "Complete Analysis Composer",
   decision_tree: "Decision Tree Generator",
@@ -50,9 +56,15 @@ const AGENT_LABELS: Record<string, string> = {
 const AGENT_DESCRIPTIONS: Record<string, string> = {
   router: "Classify query type, detect language, extract protocol IDs",
   patient_fetch: "Fetch and mask patient data from Cerebral Plus EHR",
+  reports_fetch: "Download patient reports from Cerebral Plus",
+  episodes_fetch: "Download episode history (yatış + poliklinik)",
+  reports_index: "Index reports into RAG and generate brief summary",
+  episodes_index: "Index episodes into RAG and generate summary",
   clinical: "Deep clinical reasoning with patient context and history",
   research: "Search latest guidelines across country-specific sources",
   drug: "Analyze drug interactions, dosing, and contraindications",
+  reports: "Analyze patient reports for clinical findings",
+  episodes: "Analyze episode history for treatment patterns",
   composer_fast: "Generate rapid concise answer from agent outputs",
   composer_complete: "Compose comprehensive analysis with citations",
   decision_tree: "Build clinical decision tree as React Flow diagram",
@@ -67,8 +79,8 @@ interface PhaseGroup {
 }
 
 const PHASES: PhaseGroup[] = [
-  { id: "intake", title: "Routing & Intake", agents: ["router", "patient_fetch"] },
-  { id: "council", title: "Agent Council", agents: ["clinical", "research", "drug"] },
+  { id: "intake", title: "Routing & Intake", agents: ["router", "patient_fetch", "reports_fetch", "episodes_fetch", "reports_index", "episodes_index"] },
+  { id: "council", title: "Agent Council", agents: ["clinical", "research", "drug", "reports", "episodes"] },
   { id: "compose", title: "Composition", agents: ["composer_fast", "composer_complete", "decision_tree"] },
   { id: "validate", title: "Validation", agents: ["trust_scorer", "phi_check"] },
 ];

@@ -17,7 +17,7 @@ import {
 import { ReportsKnowledgeGraph, type ManifestEntry } from "./reports-knowledge-graph";
 import { EpisodesKnowledgeGraph, type EpisodeEntry } from "./episodes-knowledge-graph";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -31,6 +31,7 @@ interface KnowledgeGraphProps {
   protocolId?: string;
   pacsAllStudies?: string;
   onOpenReport?: (entry: ManifestEntry) => void;
+  onOpenPacs?: (entry: ManifestEntry) => void;
   onOpenTrend?: (testName: string) => void;
   episodeManifest?: EpisodeEntry[];
   onOpenEpisode?: (entry: EpisodeEntry) => void;
@@ -54,6 +55,7 @@ interface GraphNodeData {
   episodeCount?: number;
   detailList?: string[];
   focused?: boolean;
+  dimmed?: boolean;
   [key: string]: unknown;
 }
 
@@ -85,6 +87,7 @@ function GraphNode({ data }: { data: GraphNodeData }) {
   const palette = COLORS[cat] || DEFAULT_COLOR;
   const isCenter = cat === "patient";
   const isFocused = !!data.focused;
+  const isDimmed = !!data.dimmed && !hovered;
 
   const hasDetails = data.detailList && data.detailList.length > 0;
   const hasMeta = data.meta && Object.keys(data.meta).length > 0;
@@ -122,7 +125,7 @@ function GraphNode({ data }: { data: GraphNodeData }) {
           background: isCenter
             ? `linear-gradient(135deg, ${palette.bg}, ${palette.bgEnd})`
             : `linear-gradient(180deg, ${palette.bg}, ${palette.bgEnd})`,
-          border: `${isFocused ? "2.5px" : "1.5px"} solid ${isFocused ? palette.border : `${palette.border}${hovered ? "" : "80"}`}`,
+          border: `${isFocused ? "2.5px" : "1.5px"} solid ${isFocused ? palette.border : `${palette.border}${hovered ? "" : isDimmed ? "30" : "80"}`}`,
           borderRadius: isCenter ? 20 : 12,
           padding: isCenter ? "16px 22px" : "10px 14px",
           minWidth: isCenter ? 170 : 115,
@@ -131,9 +134,13 @@ function GraphNode({ data }: { data: GraphNodeData }) {
             ? `0 0 40px ${palette.glow}, 0 0 80px ${palette.glow}, 0 4px 20px rgba(0,0,0,0.5)`
             : hovered
               ? `0 0 24px ${palette.glow}, 0 4px 20px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06)`
-              : `0 0 12px ${palette.glow}, 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)`,
-          transition: "all 0.25s ease",
-          transform: isFocused ? "scale(1.15)" : hovered ? "scale(1.06)" : "scale(1)",
+              : isDimmed
+                ? `0 1px 4px rgba(0,0,0,0.2)`
+                : `0 0 12px ${palette.glow}, 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)`,
+          transition: "all 0.4s ease",
+          transform: isFocused ? "scale(1.15)" : hovered ? "scale(1.06)" : isDimmed ? "scale(0.85)" : "scale(1)",
+          opacity: isDimmed ? 0.2 : 1,
+          filter: isDimmed ? "grayscale(0.7)" : "none",
           animation: isFocused ? "pulse-focus 1.5s ease-in-out infinite" : undefined,
           cursor: "grab",
           position: "relative",
@@ -219,6 +226,8 @@ function GraphNode({ data }: { data: GraphNodeData }) {
       {/* Hover tooltip */}
       {showTooltip && (
         <div
+          onClick={(ev) => ev.stopPropagation()}
+          onMouseDown={(ev) => ev.stopPropagation()}
           style={{
             position: "absolute",
             top: "100%",
@@ -230,13 +239,14 @@ function GraphNode({ data }: { data: GraphNodeData }) {
             border: `1px solid ${palette.border}40`,
             borderRadius: 12,
             padding: "12px 16px",
-            minWidth: 200,
-            maxWidth: 340,
-            maxHeight: 280,
+            minWidth: 220,
+            maxWidth: 380,
+            maxHeight: 340,
             overflowY: "auto",
             zIndex: 100,
             textAlign: "left",
             boxShadow: `0 12px 40px rgba(0,0,0,0.7), 0 0 20px ${palette.glow}`,
+            pointerEvents: "all" as const,
           }}
         >
           {/* Header */}
@@ -803,7 +813,8 @@ function Legend({ hiddenCategories, onToggleCategory }: {
         padding: "12px 14px",
         border: "1px solid rgba(255,255,255,0.08)",
         boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-        zIndex: 10,
+        zIndex: 30,
+        pointerEvents: "all",
       }}
     >
       <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, marginBottom: 2, paddingLeft: 2 }}>
@@ -913,7 +924,8 @@ function StatsBar({ data }: { data: Record<string, unknown> }) {
         borderRadius: 12,
         padding: "6px 4px",
         border: "1px solid rgba(255,255,255,0.08)",
-        zIndex: 10,
+        zIndex: 30,
+        pointerEvents: "all",
       }}
     >
       {stats.map(({ label, value, color, list }) => (
@@ -1008,6 +1020,7 @@ export function KnowledgeGraph({
   protocolId,
   pacsAllStudies,
   onOpenReport,
+  onOpenPacs,
   onOpenTrend,
   episodeManifest,
   onOpenEpisode,
@@ -1015,14 +1028,25 @@ export function KnowledgeGraph({
   const hasReports = reportManifest && reportManifest.length > 0;
   const hasEpisodes = episodeManifest && episodeManifest.length > 0;
 
-  // Auto-switch to the correct tab when focusLabel matches a report type
+  // Auto-switch to the correct tab when focusLabel matches a report type or episode
   const reportTypeNames = ["muayene", "laboratuvar", "radyoloji", "kardiyoloji", "endoskopi", "sgk", "patoloji"];
+  const episodeTypeNames = ["yatış", "poliklinik", "episode", "epizod"];
   const focusMatchesReport = focusLabel && hasReports && reportTypeNames.some(rt => focusLabel.toLowerCase().includes(rt));
-  const [activeTab, setActiveTab] = useState<"patient" | "reports" | "episodes">(
-    focusMatchesReport ? "reports" : "patient"
-  );
+  const focusMatchesEpisode = focusLabel && hasEpisodes && episodeTypeNames.some(et => focusLabel.toLowerCase().includes(et));
+  const initialTab = focusMatchesReport ? "reports" : focusMatchesEpisode ? "episodes" : "patient";
+  const [activeTab, setActiveTab] = useState<"patient" | "reports" | "episodes">(initialTab);
   const [graphSource, setGraphSource] = useState<"local" | "neo4j">("local");
   const [hiddenCategories, setHiddenCategories] = useState<Set<NodeCategory>>(new Set());
+  const [focusIsolation, setFocusIsolation] = useState(!!focusLabel);
+
+  // Update tab when focusLabel changes (e.g., user clicks a different deep link while KG is open)
+  useEffect(() => {
+    if (focusMatchesReport) setActiveTab("reports");
+    else if (focusMatchesEpisode) setActiveTab("episodes");
+    else if (focusLabel) setActiveTab("patient");
+    // Re-enable isolation when a new focus label arrives
+    if (focusLabel) setFocusIsolation(true);
+  }, [focusLabel, focusMatchesReport, focusMatchesEpisode]);
 
   const toggleCategory = useCallback((cat: NodeCategory) => {
     setHiddenCategories((prev) => {
@@ -1081,21 +1105,72 @@ export function KnowledgeGraph({
 
   const initialGraph = neo4jGraph || inlineGraph;
 
-  // If focusLabel is provided, mark the matching node(s) as focused
+  // If focusLabel is provided and isolation is active, mark matching nodes as focused,
+  // their neighbors as related, and everything else as dimmed
   const nodesWithFocus = useMemo(() => {
-    if (!focusLabel) return initialGraph.nodes;
+    if (!focusLabel || !focusIsolation) return initialGraph.nodes;
     const target = focusLabel.toLowerCase();
+
+    // Split multi-word targets into individual words for broader matching
+    const targetWords = target.split(/\s+/).filter((w) => w.length >= 3);
+
+    // 1. Find all matching (focused) node IDs — try exact substring first, then word-level
+    const focusedIds = new Set<string>();
+    initialGraph.nodes.forEach((n) => {
+      const d = n.data as GraphNodeData;
+      const searchTexts = [
+        d.label.toLowerCase(),
+        d.subtitle?.toLowerCase() || "",
+        ...(d.meta ? Object.values(d.meta).map((v) => v.toLowerCase()) : []),
+        ...(d.detailList ? d.detailList.map((item) => item.toLowerCase()) : []),
+      ].join(" ");
+
+      // Exact substring match
+      if (searchTexts.includes(target)) {
+        focusedIds.add(n.id);
+        return;
+      }
+      // Word-level match: if any target word matches
+      if (targetWords.length > 0 && targetWords.some((w) => searchTexts.includes(w))) {
+        focusedIds.add(n.id);
+      }
+    });
+
+    // If no nodes match the focus label, don't dim anything — just show all normally
+    if (focusedIds.size === 0) {
+      return initialGraph.nodes;
+    }
+
+    // 2. Collect all node IDs reachable within 2 hops from focused nodes
+    const relatedIds = new Set<string>(focusedIds);
+    // Always include patient center node
+    const patientNode = initialGraph.nodes.find((n) => (n.data as GraphNodeData).category === "patient");
+    if (patientNode) relatedIds.add(patientNode.id);
+
+    // Hop 1: direct neighbors of focused nodes
+    initialGraph.edges.forEach((e) => {
+      if (focusedIds.has(e.source)) relatedIds.add(e.target);
+      if (focusedIds.has(e.target)) relatedIds.add(e.source);
+    });
+    // Hop 2: neighbors of neighbors (so connected episodes show their diagnoses, etc.)
+    const hop1 = new Set(relatedIds);
+    initialGraph.edges.forEach((e) => {
+      if (hop1.has(e.source)) relatedIds.add(e.target);
+      if (hop1.has(e.target)) relatedIds.add(e.source);
+    });
+
+    // 3. Mark nodes: focused, related (normal), or dimmed
     return initialGraph.nodes.map((n) => {
       const d = n.data as GraphNodeData;
-      const match = d.label.toLowerCase().includes(target) ||
-        (d.subtitle && d.subtitle.toLowerCase().includes(target)) ||
-        (d.meta && Object.values(d.meta).some((v) => v.toLowerCase().includes(target)));
-      if (match) {
-        return { ...n, data: { ...d, focused: true } };
+      if (focusedIds.has(n.id)) {
+        return { ...n, data: { ...d, focused: true, dimmed: false } };
       }
-      return n;
+      if (relatedIds.has(n.id)) {
+        return { ...n, data: { ...d, focused: false, dimmed: false } };
+      }
+      return { ...n, data: { ...d, focused: false, dimmed: true } };
     });
-  }, [initialGraph.nodes, focusLabel]);
+  }, [initialGraph.nodes, initialGraph.edges, focusLabel, focusIsolation]);
 
   // Filter by hidden categories
   const filteredNodes = useMemo(() => {
@@ -1108,10 +1183,36 @@ export function KnowledgeGraph({
 
   const filteredNodeIds = useMemo(() => new Set(filteredNodes.map((n) => n.id)), [filteredNodes]);
 
+  // Build a set of dimmed node IDs for edge styling
+  const dimmedNodeIds = useMemo(() => {
+    const set = new Set<string>();
+    filteredNodes.forEach((n) => {
+      if ((n.data as GraphNodeData).dimmed) set.add(n.id);
+    });
+    return set;
+  }, [filteredNodes]);
+
   const filteredEdges = useMemo(() => {
-    if (hiddenCategories.size === 0) return initialGraph.edges;
-    return initialGraph.edges.filter((e) => filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target));
-  }, [initialGraph.edges, hiddenCategories, filteredNodeIds]);
+    let edges = initialGraph.edges;
+    if (hiddenCategories.size > 0) {
+      edges = edges.filter((e) => filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target));
+    }
+    // Dim edges connected to dimmed nodes
+    if (focusLabel && focusIsolation && dimmedNodeIds.size > 0) {
+      edges = edges.map((e) => {
+        const isDimEdge = dimmedNodeIds.has(e.source) || dimmedNodeIds.has(e.target);
+        if (isDimEdge) {
+          return {
+            ...e,
+            style: { ...e.style, opacity: 0.08, strokeWidth: 0.5 },
+            animated: false,
+          };
+        }
+        return e;
+      });
+    }
+    return edges;
+  }, [initialGraph.edges, hiddenCategories, filteredNodeIds, focusLabel, focusIsolation, dimmedNodeIds]);
 
   const [nodes, setNodes] = useState<Node[]>(filteredNodes);
   const edges = filteredEdges;
@@ -1165,7 +1266,7 @@ export function KnowledgeGraph({
           boxShadow: "0 24px 80px rgba(0,0,0,0.6), 0 0 1px rgba(255,255,255,0.1)",
         }}
       >
-        {/* Header */}
+        {/* Header — must stay above ReactFlow layers */}
         <div
           style={{
             display: "flex",
@@ -1174,6 +1275,9 @@ export function KnowledgeGraph({
             padding: "12px 20px",
             borderBottom: "1px solid rgba(255,255,255,0.06)",
             background: "linear-gradient(180deg, rgba(20,20,28,0.8), transparent)",
+            flexShrink: 0,
+            position: "relative",
+            zIndex: 20,
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1249,6 +1353,26 @@ export function KnowledgeGraph({
                   ? `${reportManifest?.length || 0} reports`
                   : `${episodeManifest?.length || 0} episodes`}
             </span>
+            {focusLabel && activeTab === "patient" && (
+              <button
+                onClick={() => setFocusIsolation(!focusIsolation)}
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  marginLeft: 6,
+                  padding: "3px 10px",
+                  borderRadius: 6,
+                  border: `1px solid ${focusIsolation ? "rgba(129,140,248,0.4)" : "rgba(255,255,255,0.1)"}`,
+                  background: focusIsolation ? "rgba(129,140,248,0.15)" : "rgba(255,255,255,0.05)",
+                  color: focusIsolation ? "#a5b4fc" : "#9ca3af",
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                }}
+                title={focusIsolation ? `Showing: "${focusLabel}" — click to show all` : `Click to isolate "${focusLabel}"`}
+              >
+                {focusIsolation ? `🔍 ${focusLabel}` : "Show All"}
+              </button>
+            )}
             {activeTab === "patient" && graphSource === "neo4j" && (
               <span style={{
                 fontSize: 9,
@@ -1311,22 +1435,40 @@ export function KnowledgeGraph({
                   style: { strokeWidth: 1.2, strokeOpacity: 0.6 },
                 }}
                 onInit={(instance) => {
-                  // Auto-zoom to focused node after initial layout — inside canvas only
-                  if (focusLabel) {
-                    const target = focusLabel.toLowerCase();
-                    const focusedNode = nodes.find((n) => {
+                  // Auto-zoom to the focused cluster — center on the average
+                  // position of all focused + related (non-dimmed) nodes
+                  if (focusLabel && focusIsolation) {
+                    // Use filteredNodes (which has focus/dimmed data) instead of nodes state
+                    const currentNodes = filteredNodes;
+                    const focusedNodes = currentNodes.filter((n) => (n.data as GraphNodeData).focused);
+                    const relevantNodes = currentNodes.filter((n) => {
                       const d = n.data as GraphNodeData;
-                      return d.label.toLowerCase().includes(target) ||
-                        (d.subtitle && d.subtitle.toLowerCase().includes(target));
+                      return d.focused || !d.dimmed;
                     });
-                    if (focusedNode) {
+
+                    if (focusedNodes.length > 0) {
+                      // Compute center of focused nodes
+                      let cx = 0, cy = 0;
+                      focusedNodes.forEach((n) => { cx += n.position.x; cy += n.position.y; });
+                      cx /= focusedNodes.length;
+                      cy /= focusedNodes.length;
+
+                      // Choose zoom based on cluster spread
+                      let maxDist = 0;
+                      relevantNodes.forEach((n) => {
+                        const dist = Math.sqrt((n.position.x - cx) ** 2 + (n.position.y - cy) ** 2);
+                        if (dist > maxDist) maxDist = dist;
+                      });
+                      const zoom = maxDist > 500 ? 0.6 : maxDist > 300 ? 0.9 : maxDist > 150 ? 1.2 : 1.5;
+
                       setTimeout(() => {
-                        instance.setCenter(
-                          focusedNode.position.x + 60,
-                          focusedNode.position.y + 20,
-                          { zoom: 1.5, duration: 800 },
-                        );
+                        instance.setCenter(cx + 60, cy + 20, { zoom, duration: 800 });
                       }, 400);
+                    } else {
+                      // No focused nodes found — just fitView normally
+                      setTimeout(() => {
+                        instance.fitView({ padding: 0.15, duration: 600 });
+                      }, 300);
                     }
                   }
                 }}
@@ -1362,6 +1504,7 @@ export function KnowledgeGraph({
               pacsAllStudies={pacsAllStudies}
               onClose={onClose}
               onOpenReport={onOpenReport}
+              onOpenPacs={onOpenPacs}
               focusLabel={focusLabel}
             />
           ) : activeTab === "episodes" && hasEpisodes ? (

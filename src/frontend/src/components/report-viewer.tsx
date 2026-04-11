@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 interface ReportViewerProps {
   file: string;
@@ -176,12 +176,12 @@ export function ReportViewer({
     }
   }, [txtUrl, loadTxt]);
 
-  // Timeout for iframe load — if iframe doesn't load in 8s, fall back
+  // Timeout for iframe load — if iframe doesn't load in 20s, fall back
   useEffect(() => {
     if (mode === "pdf" && canRenderInIframe) {
       iframeTimerRef.current = setTimeout(() => {
         handlePdfFail();
-      }, 8000);
+      }, 20000);
       return () => {
         if (iframeTimerRef.current) clearTimeout(iframeTimerRef.current);
       };

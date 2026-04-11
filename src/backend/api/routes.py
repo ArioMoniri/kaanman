@@ -382,10 +382,12 @@ async def serve_report_file(protocol_id: str, filename: str):
     }
     media_type = media_types.get(suffix, "application/octet-stream")
 
+    # Use Content-Disposition: inline so PDFs render in iframes instead of downloading
+    headers = {"Content-Disposition": f'inline; filename="{filename}"'}
     return FileResponse(
         path=str(file_path),
         media_type=media_type,
-        filename=filename,
+        headers=headers,
     )
 
 
@@ -601,10 +603,11 @@ async def serve_episode_file(protocol_id: str, filename: str):
     if not file_path.exists():
         raise HTTPException(404, f"File not found: {filename}")
 
+    headers = {"Content-Disposition": f'inline; filename="{filename}"'}
     return FileResponse(
         path=str(file_path),
         media_type="text/plain; charset=utf-8",
-        filename=filename,
+        headers=headers,
     )
 
 
