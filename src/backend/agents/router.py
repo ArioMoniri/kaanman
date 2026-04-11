@@ -45,8 +45,20 @@ class RouterAgent(BaseAgent):
 
 Classify the input into one of:
 - "MEDICAL" — any clinical, pharmacological, diagnostic, treatment, or health question
+- "PATIENT_LOOKUP" — contains a 7-9 digit patient/protocol number (ALWAYS treat as medical)
 - "GREETING" — greetings like "hello", "hi", "merhaba", "selam", small talk
 - "OFF_TOPIC" — non-medical: politics, recipes, coding, math, jokes, etc.
+
+CRITICAL RULE — PATIENT PROTOCOL NUMBERS:
+If the input contains a 7-9 digit number (e.g., 70214897, 30256609), this is ALWAYS a patient
+protocol number from the hospital EHR system. The doctor is asking about this patient.
+- ALWAYS set is_medical=true and needs_patient_context=true
+- ALWAYS set needs_clinical=true
+- Common patterns (Turkish): "70214897 nesi var", "bu hastanın durumu nasıl", "bu adama ne olmuş"
+- Common patterns (English): "what's wrong with 70214897", "tell me about patient 30256609"
+- Even bare protocol numbers like "70214897" alone mean "show me this patient's summary"
+- If the question is vague (e.g., "nesi var" = "what does he have"), classify as CLINICAL_REASONING
+  — the system will fetch the patient data and the clinical agent will summarize it.
 
 For GREETING: set is_medical=false, provide a warm direct_response in the SAME LANGUAGE as the input.
   Example (Turkish): "Merhaba! Size nasıl yardımcı olabilirim? Klinik sorularınızı bekliyorum."
@@ -56,7 +68,7 @@ For OFF_TOPIC: set is_medical=false, provide a polite redirect in the SAME LANGU
   Example: "I'm a medical assistant and can only help with clinical questions. Please ask a medical question."
   Turkish: "Ben bir tıbbi asistanım ve yalnızca klinik sorulara yardımcı olabilirim. Lütfen tıbbi bir soru sorun."
 
-For MEDICAL: proceed to Step 2.
+For MEDICAL / PATIENT_LOOKUP: proceed to Step 2.
 
 ## STEP 2: MEDICAL CLASSIFICATION
 
@@ -134,4 +146,21 @@ Set needs_decision_tree=true when the query involves:
             )
 
         decision.detected_protocol_id = detected_protocol
+
+        # Hard override: if a protocol ID was detected, this is ALWAYS a patient
+        # query — regardless of what the LLM classified. Doctors type protocol
+        # numbers to look up patients; the LLM sometimes misclassifies these as
+        # non-medical (e.g. "70214897 nesi var" → "just a number, not clinical").
+        if detected_protocol:
+            if not decision.is_medical:
+                decision.is_medical = True
+                decision.direct_response = ""
+                decision.reasoning = (
+                    f"Protocol ID {detected_protocol} detected — overriding to medical"
+                )
+            decision.needs_patient_context = True
+            decision.needs_clinical = True
+            if not decision.category or decision.category in ("GENERAL", "GREETING", "OFF_TOPIC"):
+                decision.category = "CLINICAL_REASONING"
+
         return decision
