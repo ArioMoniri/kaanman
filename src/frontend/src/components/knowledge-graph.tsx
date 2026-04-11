@@ -121,26 +121,26 @@ function GraphNode({ data }: { data: GraphNodeData }) {
       <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
       <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
 
-      {/* Card node */}
+      {/* Card node — compact sizing for dense graphs */}
       <div
         style={{
           background: isCenter
             ? `linear-gradient(135deg, ${palette.bg}, ${palette.bgEnd})`
             : `linear-gradient(180deg, ${palette.bg}, ${palette.bgEnd})`,
-          border: `${isFocused ? "2.5px" : "1.5px"} solid ${isFocused ? palette.border : `${palette.border}${hovered ? "" : isDimmed ? "30" : "80"}`}`,
-          borderRadius: isCenter ? 20 : 12,
-          padding: isCenter ? "16px 22px" : "10px 14px",
-          minWidth: isCenter ? 170 : 115,
-          maxWidth: isCenter ? 210 : 185,
+          border: `${isFocused ? "2px" : "1px"} solid ${isFocused ? palette.border : `${palette.border}${hovered ? "" : isDimmed ? "30" : "80"}`}`,
+          borderRadius: isCenter ? 14 : 8,
+          padding: isCenter ? "8px 12px" : "4px 8px",
+          minWidth: isCenter ? 100 : 60,
+          maxWidth: isCenter ? 140 : 120,
           boxShadow: isFocused
-            ? `0 0 40px ${palette.glow}, 0 0 80px ${palette.glow}, 0 4px 20px rgba(0,0,0,0.5)`
+            ? `0 0 20px ${palette.glow}, 0 0 40px ${palette.glow}, 0 2px 10px rgba(0,0,0,0.5)`
             : hovered
-              ? `0 0 24px ${palette.glow}, 0 4px 20px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06)`
+              ? `0 0 14px ${palette.glow}, 0 2px 12px rgba(0,0,0,0.5)`
               : isDimmed
-                ? `0 1px 4px rgba(0,0,0,0.2)`
-                : `0 0 12px ${palette.glow}, 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)`,
-          transition: "all 0.4s ease",
-          transform: isFocused ? "scale(1.15)" : hovered ? "scale(1.06)" : isDimmed ? "scale(0.85)" : "scale(1)",
+                ? `0 1px 3px rgba(0,0,0,0.2)`
+                : `0 0 6px ${palette.glow}, 0 1px 4px rgba(0,0,0,0.3)`,
+          transition: "all 0.3s ease",
+          transform: isFocused ? "scale(1.1)" : hovered ? "scale(1.04)" : isDimmed ? "scale(0.9)" : "scale(1)",
           opacity: isDimmed ? 0.2 : 1,
           filter: isDimmed ? "grayscale(0.7)" : "none",
           animation: isFocused ? "pulse-focus 1.5s ease-in-out infinite" : undefined,
@@ -149,21 +149,21 @@ function GraphNode({ data }: { data: GraphNodeData }) {
         }}
       >
         {/* Icon + Label row */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: isCenter ? "center" : "flex-start" }}>
-          <span style={{ fontSize: isCenter ? 22 : 14, lineHeight: 1 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: isCenter ? "center" : "flex-start" }}>
+          <span style={{ fontSize: isCenter ? 14 : 10, lineHeight: 1 }}>
             {palette.icon}
           </span>
           <div style={{ flex: 1, minWidth: 0, textAlign: isCenter ? "center" : "left" }}>
             <div
               style={{
-                fontSize: isCenter ? 15 : 11,
+                fontSize: isCenter ? 11 : 9,
                 fontWeight: isCenter ? 800 : 600,
                 color: palette.text,
-                lineHeight: 1.3,
+                lineHeight: 1.2,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: isCenter ? "normal" : "nowrap",
-                letterSpacing: isCenter ? 0.3 : 0,
+                letterSpacing: isCenter ? 0.2 : 0,
               }}
             >
               {data.label}
@@ -171,9 +171,9 @@ function GraphNode({ data }: { data: GraphNodeData }) {
             {data.subtitle && (
               <div
                 style={{
-                  fontSize: 9,
+                  fontSize: 7,
                   color: `${palette.border}cc`,
-                  marginTop: 2,
+                  marginTop: 1,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
@@ -191,17 +191,17 @@ function GraphNode({ data }: { data: GraphNodeData }) {
           <div
             style={{
               position: "absolute",
-              top: -8,
-              right: -6,
+              top: -6,
+              right: -5,
               background: `linear-gradient(135deg, ${palette.border}, ${palette.bg})`,
               color: "#fff",
-              fontSize: 9,
+              fontSize: 7,
               fontWeight: 700,
-              borderRadius: 10,
-              padding: "2px 7px",
-              minWidth: 18,
+              borderRadius: 8,
+              padding: "1px 5px",
+              minWidth: 14,
               textAlign: "center",
-              boxShadow: `0 2px 8px ${palette.glow}`,
+              boxShadow: `0 1px 4px ${palette.glow}`,
               border: `1px solid ${palette.border}`,
             }}
           >
@@ -215,9 +215,9 @@ function GraphNode({ data }: { data: GraphNodeData }) {
             style={{
               position: "absolute",
               bottom: 0,
-              left: 12,
-              right: 12,
-              height: 2,
+              left: 6,
+              right: 6,
+              height: 1,
               borderRadius: 1,
               background: `linear-gradient(90deg, transparent, ${palette.border}60, transparent)`,
             }}
@@ -388,7 +388,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
   nodes.push({
     id: patientId,
     type: "graphNode",
-    position: { x: CX - 80, y: CY - 40 },
+    position: { x: CX - 50, y: CY - 25 },
     draggable: true,
     data: {
       label: patientName,
@@ -486,7 +486,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
 
   /* ============ 4. Department nodes (inner ring) ============ */
   const departments = Array.from(deptEpisodes.keys());
-  const DEPT_RADIUS = 340;
+  const DEPT_RADIUS = 250;
   const deptNodeIds = new Map<string, string>();
 
   departments.forEach((dept, i) => {
@@ -499,7 +499,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     nodes.push({
       id: deptId,
       type: "graphNode",
-      position: { x: pos.x - 55, y: pos.y - 28 },
+      position: { x: pos.x - 35, y: pos.y - 18 },
       draggable: true,
       data: {
         label: dept,
@@ -519,7 +519,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
   });
 
   /* ============ 5. Position episode nodes around their department ============ */
-  const EPISODE_RADIUS = 200;
+  const EPISODE_RADIUS = 150;
   departments.forEach((dept, deptIdx) => {
     const epIds = deptEpisodes.get(dept)!.nodeIds;
     const deptAngle = (360 / departments.length) * deptIdx - 90;
@@ -538,7 +538,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
 
       const epNode = nodes.find((n) => n.id === epId);
       if (epNode) {
-        epNode.position = { x: pos.x - 55, y: pos.y - 22 };
+        epNode.position = { x: pos.x - 35, y: pos.y - 14 };
       }
 
       edges.push({
@@ -551,7 +551,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
   });
 
   /* ============ 6. Diagnosis nodes ============ */
-  const DIAG_RADIUS = 180;
+  const DIAG_RADIUS = 130;
   const diagEntries = Array.from(diagMap.entries());
 
   diagEntries.forEach(([, { name, icd, episodeNodeIds: epIds, dates }]) => {
@@ -589,10 +589,10 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     nodes.push({
       id: diagId,
       type: "graphNode",
-      position: { x: px - 55, y: py - 22 },
+      position: { x: px - 35, y: py - 14 },
       draggable: true,
       data: {
-        label: displayName.length > 30 ? displayName.slice(0, 28) + "..." : displayName,
+        label: displayName.length > 24 ? displayName.slice(0, 22) + "..." : displayName,
         subtitle: subtitleParts.join("") || undefined,
         category: "diagnosis" as NodeCategory,
         episodeCount: epIds.length > 1 ? epIds.length : undefined,
@@ -614,7 +614,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
   const recipes = (patientInfo.previous_recipes as Record<string, unknown>[]) || [];
   if (recipes.length > 0) {
     const MED_ANGLE_START = 200;
-    const MED_RADIUS = 300;
+    const MED_RADIUS = 220;
     const medSpread = Math.min(100, recipes.length * 15);
 
     recipes.forEach((med, i) => {
@@ -636,10 +636,10 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
       nodes.push({
         id: medId,
         type: "graphNode",
-        position: { x: pos.x - 55, y: pos.y - 22 },
+        position: { x: pos.x - 35, y: pos.y - 14 },
         draggable: true,
         data: {
-          label: medName.length > 28 ? medName.slice(0, 26) + "..." : medName,
+          label: medName.length > 20 ? medName.slice(0, 18) + "..." : medName,
           subtitle: dosage || undefined,
           category: "medication" as NodeCategory,
           meta: {
@@ -676,12 +676,12 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     }
 
     const ALLERGY_ANGLE = 30;
-    const pos = polarToCartesian(CX, CY, 280, ALLERGY_ANGLE);
+    const pos = polarToCartesian(CX, CY, 200, ALLERGY_ANGLE);
 
     nodes.push({
       id: allergyId,
       type: "graphNode",
-      position: { x: pos.x - 55, y: pos.y - 22 },
+      position: { x: pos.x - 35, y: pos.y - 14 },
       draggable: true,
       data: {
         label: allergyLabel,
@@ -703,7 +703,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
   /* ============ 9. Doctor nodes ============ */
   const doctors = Array.from(doctorEpisodes.keys());
   if (doctors.length > 0 && doctors.length <= 30) {
-    const DOC_RADIUS = 270;
+    const DOC_RADIUS = 200;
     const DOC_START = 140;
     const docSpread = Math.min(160, doctors.length * 18);
 
@@ -719,10 +719,10 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
       nodes.push({
         id: docId,
         type: "graphNode",
-        position: { x: pos.x - 55, y: pos.y - 22 },
+        position: { x: pos.x - 35, y: pos.y - 14 },
         draggable: true,
         data: {
-          label: doc.length > 24 ? doc.slice(0, 22) + "..." : doc,
+          label: doc.length > 20 ? doc.slice(0, 18) + "..." : doc,
           category: "doctor" as NodeCategory,
           episodeCount: info.nodeIds.length,
           meta: {
@@ -745,7 +745,7 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
   /* ============ 10. Facility nodes ============ */
   const facilities = Array.from(facilityEpisodes.keys());
   if (facilities.length > 0 && facilities.length <= 15) {
-    const FAC_RADIUS = 280;
+    const FAC_RADIUS = 210;
     const FAC_START = -30;
     const facSpread = Math.min(100, facilities.length * 25);
 
@@ -760,10 +760,10 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
       nodes.push({
         id: facId,
         type: "graphNode",
-        position: { x: pos.x - 55, y: pos.y - 22 },
+        position: { x: pos.x - 35, y: pos.y - 14 },
         draggable: true,
         data: {
-          label: fac.length > 28 ? fac.slice(0, 26) + "..." : fac,
+          label: fac.length > 20 ? fac.slice(0, 18) + "..." : fac,
           category: "facility" as NodeCategory,
           episodeCount: facilityEpisodes.get(fac)!.length,
         } satisfies GraphNodeData,
@@ -808,19 +808,19 @@ function Legend({ hiddenCategories, onToggleCategory }: {
         left: 12,
         display: "flex",
         flexDirection: "column",
-        gap: 4,
+        gap: 2,
         background: "linear-gradient(180deg, rgba(13,13,18,0.95), rgba(8,8,12,0.95))",
         backdropFilter: "blur(16px)",
-        borderRadius: 14,
-        padding: "12px 14px",
+        borderRadius: 10,
+        padding: "8px 10px",
         border: "1px solid rgba(255,255,255,0.08)",
-        boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
         zIndex: 30,
         pointerEvents: "all",
       }}
     >
-      <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, marginBottom: 2, paddingLeft: 2 }}>
-        Filter Categories
+      <div style={{ fontSize: 8, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.8, fontWeight: 700, marginBottom: 1, paddingLeft: 2 }}>
+        Filter
       </div>
       {items.map(({ category, label }) => {
         const isHidden = hiddenCategories.has(category);
@@ -831,9 +831,9 @@ function Legend({ hiddenCategories, onToggleCategory }: {
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 8,
-              padding: "5px 8px",
-              borderRadius: 8,
+              gap: 4,
+              padding: "3px 6px",
+              borderRadius: 6,
               border: "none",
               cursor: category === "patient" ? "default" : "pointer",
               background: isHidden ? "rgba(255,255,255,0.02)" : `${COLORS[category].border}12`,
@@ -842,13 +842,13 @@ function Legend({ hiddenCategories, onToggleCategory }: {
             }}
           >
             <div style={{
-              width: 10, height: 10, borderRadius: 3,
+              width: 8, height: 8, borderRadius: 2,
               background: isHidden ? "#333" : COLORS[category].border,
-              border: `1.5px solid ${isHidden ? "#444" : COLORS[category].border}`,
+              border: `1px solid ${isHidden ? "#444" : COLORS[category].border}`,
               transition: "all 0.2s",
             }} />
-            <span style={{ fontSize: 11 }}>{COLORS[category].icon}</span>
-            <span style={{ fontSize: 11, color: isHidden ? "#4b5563" : COLORS[category].text, fontWeight: 500 }}>{label}</span>
+            <span style={{ fontSize: 9 }}>{COLORS[category].icon}</span>
+            <span style={{ fontSize: 9, color: isHidden ? "#4b5563" : COLORS[category].text, fontWeight: 500 }}>{label}</span>
           </button>
         );
       })}
@@ -923,8 +923,8 @@ function StatsBar({ data }: { data: Record<string, unknown> }) {
         gap: 2,
         background: "rgba(10,10,14,0.9)",
         backdropFilter: "blur(12px)",
-        borderRadius: 12,
-        padding: "6px 4px",
+        borderRadius: 10,
+        padding: "4px 3px",
         border: "1px solid rgba(255,255,255,0.08)",
         zIndex: 30,
         pointerEvents: "all",
@@ -937,15 +937,15 @@ function StatsBar({ data }: { data: Record<string, unknown> }) {
             textAlign: "center",
             position: "relative",
             cursor: list.length > 0 ? "pointer" : "default",
-            padding: "4px 14px",
-            borderRadius: 8,
+            padding: "3px 10px",
+            borderRadius: 6,
             background: hoveredStat === label ? "rgba(255,255,255,0.05)" : "transparent",
             transition: "background 0.2s",
           }}
           onClick={() => list.length > 0 && setHoveredStat(hoveredStat === label ? null : label)}
         >
-          <div style={{ fontSize: 18, fontWeight: 800, color, lineHeight: 1.2 }}>{value}</div>
-          <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color, lineHeight: 1.2 }}>{value}</div>
+          <div style={{ fontSize: 8, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}>
             {label}
           </div>
 
@@ -1300,8 +1300,10 @@ export function KnowledgeGraph({
       onClick={handleBackdropClick}
     >
       <div
-        className="w-full h-full max-w-[96vw] max-h-[94vh] flex flex-col overflow-hidden"
+        className="flex flex-col overflow-hidden"
         style={{
+          width: "96vw",
+          height: "92vh",
           background: "linear-gradient(180deg, #0d0d12, #08080c)",
           borderRadius: 16,
           border: "1px solid rgba(255,255,255,0.08)",
@@ -1314,7 +1316,7 @@ export function KnowledgeGraph({
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            padding: "12px 20px",
+            padding: "8px 16px",
             borderBottom: "1px solid rgba(255,255,255,0.06)",
             background: "linear-gradient(180deg, rgba(20,20,28,0.8), transparent)",
             flexShrink: 0,
@@ -1527,10 +1529,10 @@ export function KnowledgeGraph({
                 nodeTypes={nodeTypes}
                 nodesDraggable
                 fitView
-                fitViewOptions={{ padding: 0.15 }}
+                fitViewOptions={{ padding: 0.2, maxZoom: 0.85 }}
                 colorMode="dark"
-                minZoom={0.05}
-                maxZoom={2.5}
+                minZoom={0.02}
+                maxZoom={3}
                 proOptions={{ hideAttribution: true }}
                 defaultEdgeOptions={{
                   type: "smoothstep",
@@ -1590,10 +1592,10 @@ export function KnowledgeGraph({
                   style={{
                     background: "rgba(13,13,18,0.9)",
                     border: "1px solid rgba(255,255,255,0.06)",
-                    borderRadius: 12,
-                    height: 110,
-                    width: 160,
-                    boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+                    borderRadius: 8,
+                    height: 80,
+                    width: 120,
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
                   }}
                 />
               </ReactFlow>
