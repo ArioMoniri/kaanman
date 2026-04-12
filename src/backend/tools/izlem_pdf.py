@@ -60,6 +60,8 @@ tr:nth-child(even) td { background: #f8fafc; }
                  border-radius: 0 4px 4px 0; }
 .note-block { background: #f8fafc; border-left: 3px solid #6366f1; padding: 4px 10px;
               margin: 3px 0; font-size: 8px; border-radius: 0 4px 4px 0; }
+code { background: #f1f5f9; padding: 1px 3px; border-radius: 2px; font-size: 8px;
+       font-family: monospace; }
 .muted { color: #6b7280; font-size: 8px; font-style: italic; }
 .small { font-size: 7px; }
 .sep { border-top: 2px solid #e0e7ff; margin: 8px 0; }
@@ -346,53 +348,89 @@ def _build_episode_html(ep: dict, idx: int, language: str) -> str:
     return "\n".join(p for p in parts if p)
 
 
+def _inline_format(text: str) -> str:
+    """Apply inline markdown formatting (bold, italic, links, refs)."""
+    text = re.sub(r'\*\*\*([^*]+)\*\*\*', r'<b><i>\1</i></b>', text)
+    text = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'\*([^*]+)\*', r'<i>\1</i>', text)
+    text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
+    text = re.sub(r'\[\d+\]', '', text)
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    return text
+
+
 def _md_to_html(md_text: str) -> str:
     """Convert markdown text to HTML for PDF rendering."""
     lines = md_text.split("\n")
     html_parts: list[str] = []
     in_list = False
+    in_table = False
 
     for line in lines:
         s = line.strip()
         if not s:
             if in_list:
                 html_parts.append("</ul>"); in_list = False
+            if in_table:
+                html_parts.append("</table>"); in_table = False
             continue
+
+        # Horizontal rules: ---, ***, ___
+        if re.match(r'^[-*_]{3,}\s*$', s):
+            if in_list: html_parts.append("</ul>"); in_list = False
+            if in_table: html_parts.append("</table>"); in_table = False
+            html_parts.append('<div class="sep"></div>')
+            continue
+
+        # Table separator rows (|---|---|)
+        if re.match(r'^\|?\s*[-:]+[-|\s:]+\s*\|?$', s):
+            continue  # skip markdown table alignment rows
+
+        # Table rows (| col | col |)
+        if '|' in s and re.match(r'^\|.*\|$', s.strip()):
+            cells = [c.strip() for c in s.strip('|').split('|')]
+            if not in_table:
+                html_parts.append("<table>")
+                in_table = True
+                html_parts.append("<tr>" + "".join(
+                    f"<th>{_inline_format(_esc(c))}</th>" for c in cells) + "</tr>")
+            else:
+                html_parts.append("<tr>" + "".join(
+                    f"<td>{_inline_format(_esc(c))}</td>" for c in cells) + "</tr>")
+            continue
+
+        if in_table:
+            html_parts.append("</table>"); in_table = False
 
         if s.startswith("#### "):
             if in_list: html_parts.append("</ul>"); in_list = False
-            html_parts.append(f"<h4>{_esc(s[5:])}</h4>")
+            html_parts.append(f"<h4>{_inline_format(_esc(s[5:]))}</h4>")
         elif s.startswith("### "):
             if in_list: html_parts.append("</ul>"); in_list = False
-            html_parts.append(f"<h3>{_esc(s[4:])}</h3>")
+            html_parts.append(f"<h3>{_inline_format(_esc(s[4:]))}</h3>")
         elif s.startswith("## "):
             if in_list: html_parts.append("</ul>"); in_list = False
-            html_parts.append(f"<h2>{_esc(s[3:])}</h2>")
+            html_parts.append(f"<h2>{_inline_format(_esc(s[3:]))}</h2>")
         elif s.startswith("# "):
             if in_list: html_parts.append("</ul>"); in_list = False
-            html_parts.append(f"<h1>{_esc(s[2:])}</h1>")
+            html_parts.append(f"<h1>{_inline_format(_esc(s[2:]))}</h1>")
         elif s.startswith(("- ", "* ", "• ")):
             if not in_list: html_parts.append("<ul>"); in_list = True
-            content = _esc(s[2:])
-            content = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', content)
+            content = _inline_format(_esc(s[2:]))
             html_parts.append(f"<li>{content}</li>")
         elif re.match(r'^\d+\.\s', s):
             if not in_list: html_parts.append("<ul>"); in_list = True
-            content = _esc(re.sub(r'^\d+\.\s*', '', s))
-            content = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', content)
+            content = _inline_format(_esc(re.sub(r'^\d+\.\s*', '', s)))
             html_parts.append(f"<li>{content}</li>")
         else:
             if in_list: html_parts.append("</ul>"); in_list = False
-            escaped = _esc(s)
-            escaped = re.sub(r'\*\*\*([^*]+)\*\*\*', r'<b><i>\1</i></b>', escaped)
-            escaped = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', escaped)
-            escaped = re.sub(r'\*([^*]+)\*', r'<i>\1</i>', escaped)
-            escaped = re.sub(r'\[\d+\]', '', escaped)
-            escaped = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', escaped)
+            escaped = _inline_format(_esc(s))
             html_parts.append(f"<p>{escaped}</p>")
 
     if in_list:
         html_parts.append("</ul>")
+    if in_table:
+        html_parts.append("</table>")
     return "\n".join(html_parts)
 
 
@@ -636,6 +674,102 @@ async def create_izlem_pdf(
     return str(pdf_path)
 
 
+def _detect_section_type(heading: str) -> str | None:
+    """Detect clinical section type from heading text for icon/styling."""
+    h = heading.lower()
+    if any(k in h for k in ["uyarı", "alert", "kritik", "critical", "acil"]):
+        return "alert"
+    if any(k in h for k in ["vital", "nabız", "tansiyon", "spo2", "ateş"]):
+        return "vitals"
+    if any(k in h for k in ["ilaç", "medik", "medicat", "tedavi", "prescrip"]):
+        return "meds"
+    if any(k in h for k in ["lab", "laboratuvar", "hemogram", "biyokimya"]):
+        return "labs"
+    if any(k in h for k in ["hekim", "doktor", "doctor", "muayene"]):
+        return "doctor"
+    if any(k in h for k in ["hemşire", "nurse", "bakım"]):
+        return "nurse"
+    if any(k in h for k in ["özet", "summary", "24 saat", "24h", "son 24"]):
+        return "summary"
+    if any(k in h for k in ["geçmiş", "past", "history", "önceki"]):
+        return "history"
+    if any(k in h for k in ["enfeksiyon", "infection", "izolasyon"]):
+        return "infection"
+    if any(k in h for k in ["epizod", "episode"]):
+        return "episode"
+    return None
+
+
+def _section_icon(section_type: str | None) -> str:
+    """Return an HTML icon prefix for a clinical section."""
+    icons = {
+        "alert": '<span style="color:#dc2626;font-size:11px">&#9888;</span> ',
+        "vitals": '<span style="color:#2563eb;font-size:10px">&#9829;</span> ',
+        "meds": '<span style="color:#059669;font-size:10px">&#9736;</span> ',
+        "labs": '<span style="color:#7c3aed;font-size:10px">&#9878;</span> ',
+        "doctor": '<span style="color:#1e3a5f;font-size:10px">&#9737;</span> ',
+        "nurse": '<span style="color:#0891b2;font-size:10px">&#9737;</span> ',
+        "summary": '<span style="color:#1e1b4b;font-size:10px">&#9670;</span> ',
+        "history": '<span style="color:#6b7280;font-size:10px">&#9201;</span> ',
+        "infection": '<span style="color:#dc2626;font-size:10px">&#9763;</span> ',
+        "episode": '<span style="color:#4338ca;font-size:10px">&#9679;</span> ',
+    }
+    return icons.get(section_type, "")
+
+
+def _enhance_answer_html(md_text: str, language: str) -> str:
+    """Convert LLM answer markdown to enhanced HTML with section detection and styling.
+
+    Detects clinical sections, applies appropriate alert/note styles,
+    and structures the content professionally.
+    """
+    base_html = _md_to_html(md_text)
+    lines = base_html.split("\n")
+    enhanced: list[str] = []
+    in_alert_section = False
+
+    for line in lines:
+        # Detect h2/h3 headings and add section icons + styling
+        h2_match = re.match(r'<h2>(.*?)</h2>', line)
+        h3_match = re.match(r'<h3>(.*?)</h3>', line)
+
+        if h2_match:
+            heading_text = h2_match.group(1)
+            # Strip existing HTML tags for detection
+            plain = re.sub(r'<[^>]+>', '', heading_text)
+            sec_type = _detect_section_type(plain)
+            icon = _section_icon(sec_type)
+            in_alert_section = sec_type == "alert"
+            if sec_type == "episode":
+                enhanced.append(f'<div class="page-break"></div>')
+            enhanced.append(f'<h2>{icon}{heading_text}</h2>')
+            continue
+
+        if h3_match:
+            heading_text = h3_match.group(1)
+            plain = re.sub(r'<[^>]+>', '', heading_text)
+            sec_type = _detect_section_type(plain)
+            icon = _section_icon(sec_type)
+            in_alert_section = sec_type == "alert"
+            enhanced.append(f'<h3>{icon}{heading_text}</h3>')
+            continue
+
+        # Style list items in alert sections as alert boxes
+        if in_alert_section and line.startswith("<li>"):
+            content = line.replace("<li>", "").replace("</li>", "")
+            is_critical = any(k in content.lower() for k in [
+                "kritik", "critical", "acil", "düşük spo2", "taşikardi", "bradikardi",
+                "hr>120", "hr<50", "spo2<92",
+            ])
+            cls = "alert-critical" if is_critical else "alert-warning"
+            enhanced.append(f'<div class="{cls}">{content}</div>')
+            continue
+
+        enhanced.append(line)
+
+    return "\n".join(enhanced)
+
+
 async def create_izlem_pdf_from_answer(
     protocol_id: str,
     answer_text: str,
@@ -644,7 +778,8 @@ async def create_izlem_pdf_from_answer(
 ) -> str:
     """Create a PDF from LLM izlem answer text (fallback when raw data unavailable).
 
-    Renders markdown as styled HTML with full Turkish character support.
+    Renders markdown as styled HTML with full Turkish character support,
+    section detection, clinical alert styling, and professional formatting.
     """
     now = datetime.now()
     ts = now.strftime("%Y%m%d_%H%M%S")
@@ -653,29 +788,56 @@ async def create_izlem_pdf_from_answer(
     pdf_path = out / f"izlem_brief_{protocol_id}_{ts}.pdf"
 
     is_tr = language == "tr"
-    title = "Hasta İzlem Özeti" if is_tr else "Patient Monitoring Brief"
-    note = ("Not: Bu özet, mevcut hasta verileri ve klinik geçmişten oluşturulmuştur."
-            if is_tr else "Note: Generated from available patient data and clinical history.")
+    title = "Hasta İzlem Raporu" if is_tr else "Patient Monitoring Report"
+    subtitle = "Günlük Klinik İzlem Özeti" if is_tr else "Daily Clinical Monitoring Summary"
+    note = ("Bu rapor, mevcut hasta verileri ve klinik geçmişten otomatik olarak oluşturulmuştur."
+            if is_tr else "This report was automatically generated from available patient data and clinical history.")
 
-    html = f"""<h1>{_esc(title)}</h1>
-<p class="muted">Protokol: {_esc(protocol_id)} | Tarih: {now.strftime('%Y-%m-%d %H:%M')}</p>
-<p class="small muted">{_esc(note)}</p>
+    # Enhanced HTML with header block, section detection, and styling
+    body_html = _enhance_answer_html(answer_text, language)
+
+    html = f"""<div style="text-align:center;margin-bottom:6px">
+<h1 style="margin-bottom:2px">{_esc(title)}</h1>
+<p style="font-size:11px;color:#4338ca;font-weight:600;margin:0">{_esc(subtitle)}</p>
+</div>
+<p style="font-size:8px;color:#374151;margin:6px 0 2px 0;text-align:center"><b>Protokol No:</b> {_esc(protocol_id)} &nbsp; | &nbsp; <b>Rapor Tarihi:</b> {now.strftime('%d.%m.%Y %H:%M')}</p>
 <div class="sep"></div>
-{_md_to_html(answer_text)}"""
+<p class="small muted" style="text-align:center">{_esc(note)}</p>
+<div class="sep"></div>
+{body_html}
+<div class="sep"></div>
+<p class="small muted" style="text-align:center;margin-top:12px">
+{'Bu rapor CerebraLink klinik karar destek sistemi tarafından oluşturulmuştur. Klinik kararlar için hekim değerlendirmesi gereklidir.'
+ if is_tr else
+ 'This report was generated by the CerebraLink clinical decision support system. Clinical decisions require physician evaluation.'}
+</p>"""
 
     tmp_pdf = tempfile.mktemp(suffix=".pdf")
     try:
         _render_story_to_doc(html, tmp_pdf)
         doc = fitz.open(tmp_pdf)
 
-        # Add footers
+        # Add header line and footers to every page
         footer_font = fitz.Font("helv")
         for i in range(len(doc)):
-            tw = fitz.TextWriter(doc[i].rect)
-            footer = (f"CerebraLink İzlem Raporu — Protokol {protocol_id} — "
-                      f"Sayfa {i + 1}/{len(doc)} — {now.strftime('%Y-%m-%d %H:%M')}")
-            tw.append(fitz.Point(_ML, _PH - 20), footer, font=footer_font, fontsize=7)
-            tw.write_text(doc[i], color=(0.5, 0.5, 0.5))
+            page = doc[i]
+            # Thin header line at top
+            page.draw_line(
+                fitz.Point(_ML, _MT - 8), fitz.Point(_MR, _MT - 8),
+                color=(0.65, 0.7, 0.95), width=0.8,
+            )
+            # Footer
+            tw = fitz.TextWriter(page.rect)
+            footer_left = f"CerebraLink İzlem Raporu — Protokol {protocol_id}"
+            footer_right = f"Sayfa {i + 1}/{len(doc)} — {now.strftime('%d.%m.%Y %H:%M')}"
+            tw.append(fitz.Point(_ML, _PH - 20), footer_left, font=footer_font, fontsize=6.5)
+            tw.append(fitz.Point(_MR - 120, _PH - 20), footer_right, font=footer_font, fontsize=6.5)
+            tw.write_text(page, color=(0.5, 0.5, 0.5))
+            # Footer line
+            page.draw_line(
+                fitz.Point(_ML, _PH - 28), fitz.Point(_MR, _PH - 28),
+                color=(0.85, 0.85, 0.9), width=0.5,
+            )
 
         doc.save(str(pdf_path))
         page_count = len(doc)

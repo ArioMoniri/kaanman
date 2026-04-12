@@ -331,10 +331,15 @@ class Orchestrator:
                             "phase": "patient_fetch",
                         })
                         idata = await auto_fetch_izlem(detected_pid)
+                        # auto_fetch_izlem returns wrapper {"izlem_data": {...}, ...}
+                        # Unwrap to get raw izlem data with "episodes" key
+                        if isinstance(idata, dict) and "izlem_data" in idata:
+                            return idata["izlem_data"]
                         return idata
                     except Exception as ie:
                         logging.getLogger("cerebralink.orchestrator").warning(
-                            "Izlem fetch failed for %s: %s", detected_pid, ie
+                            "Izlem fetch failed for %s: %s", detected_pid, ie,
+                            exc_info=True,
                         )
                         return None
 
@@ -774,6 +779,12 @@ class Orchestrator:
             parallel_tasks.append(asyncio.create_task(_gen_decision_tree()))
 
         # Izlem PDF brief generation (runs in parallel with compose/tree)
+        _izlem_log = logging.getLogger("cerebralink.orchestrator.izlem")
+        _izlem_log.info(
+            "Izlem PDF check: needs_izlem=%s, izlem_data=%s, detected_pid=%s, episodes=%d",
+            route.needs_izlem, bool(izlem_data), detected_pid,
+            len(izlem_data.get("episodes", [])) if isinstance(izlem_data, dict) else 0,
+        )
         if route.needs_izlem and izlem_data and detected_pid:
             async def _gen_izlem_pdf():
                 await self._emit(on_status, {
@@ -788,9 +799,9 @@ class Orchestrator:
                         language=route.language,
                     )
                     elapsed = int((time.monotonic() - t0) * 1000)
-                    # Extract just the filename from the full path
                     import os
                     result.izlem_brief_pdf = os.path.basename(pdf_path)
+                    _izlem_log.info("Primary izlem PDF created: %s (%dms)", pdf_path, elapsed)
                     await self._emit(on_status, {
                         "agent": "izlem_pdf", "status": "done",
                         "time_ms": elapsed,
@@ -798,8 +809,8 @@ class Orchestrator:
                         "message": "izlem PDF ready",
                     })
                 except Exception as e:
-                    logging.getLogger("cerebralink.orchestrator").warning(
-                        "Izlem PDF generation failed: %s", e,
+                    _izlem_log.warning(
+                        "Izlem PDF generation failed: %s", e, exc_info=True,
                     )
                     await self._emit(on_status, {
                         "agent": "izlem_pdf", "status": "error",
