@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { ArrowUp, Square, Mic, MicOff, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
+import { VoiceMorph } from "@/components/ui/voice-morph";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -42,6 +43,7 @@ function useVoiceInput(onTranscript: (text: string) => void) {
   const [isSupported, setIsSupported] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<VoiceMode>("idle");
+  const [audioLevel, setAudioLevel] = useState(0);
 
   // Refs
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -53,6 +55,10 @@ function useVoiceInput(onTranscript: (text: string) => void) {
   const webSpeechBrokenRef = useRef(false);
   // Whether the backend transcription endpoint is available
   const backendAvailableRef = useRef<boolean | null>(null);
+  // Audio analyser for volume metering
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioRafRef = useRef<number>(0);
 
   // ── Check support on mount ──
   useEffect(() => {
@@ -83,6 +89,45 @@ function useVoiceInput(onTranscript: (text: string) => void) {
     }
   }, []);
 
+  // ── Audio level metering ──
+  const startAudioMeter = useCallback((stream: MediaStream) => {
+    try {
+      const ctx = new AudioContext();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.5;
+      source.connect(analyser);
+      audioCtxRef.current = ctx;
+      analyserRef.current = analyser;
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        if (!analyserRef.current) return;
+        analyserRef.current.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+        const avg = sum / dataArray.length / 255;
+        setAudioLevel(Math.min(1, avg * 2.5));
+        audioRafRef.current = requestAnimationFrame(tick);
+      };
+      tick();
+    } catch { /* audio context not available */ }
+  }, []);
+
+  const stopAudioMeter = useCallback(() => {
+    if (audioRafRef.current) {
+      cancelAnimationFrame(audioRafRef.current);
+      audioRafRef.current = 0;
+    }
+    analyserRef.current = null;
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close().catch(() => {});
+      audioCtxRef.current = null;
+    }
+    setAudioLevel(0);
+  }, []);
+
   // ── Web Speech API start ──
   const startWebSpeech = useCallback(() => {
     if (recognitionRef.current) return;
@@ -104,6 +149,11 @@ function useVoiceInput(onTranscript: (text: string) => void) {
       setIsListening(true);
       setMode("web-speech");
       setError(null);
+      // Get mic stream for audio level metering (visual only)
+      navigator.mediaDevices?.getUserMedia({ audio: true }).then((stream) => {
+        streamRef.current = stream;
+        startAudioMeter(stream);
+      }).catch(() => { /* meter not critical */ });
     });
 
     recognition.addEventListener("result", (event) => {
@@ -179,7 +229,7 @@ function useVoiceInput(onTranscript: (text: string) => void) {
       wantListeningRef.current = false;
       recognitionRef.current = null;
     }
-  }, [onTranscript]);
+  }, [onTranscript, startAudioMeter]);
 
   // ── MediaRecorder start (fallback) ──
   const startRecorder = useCallback(async () => {
@@ -278,6 +328,7 @@ function useVoiceInput(onTranscript: (text: string) => void) {
       setIsListening(true);
       setMode("recorder");
       setInterim("Recording... click mic to stop");
+      startAudioMeter(stream);
     } catch (e) {
       if (e instanceof DOMException && e.name === "NotAllowedError") {
         setError("Microphone access denied — check browser permissions");
@@ -285,11 +336,12 @@ function useVoiceInput(onTranscript: (text: string) => void) {
         setError(`Could not access microphone: ${e instanceof Error ? e.message : "Unknown"}`);
       }
     }
-  }, [onTranscript]);
+  }, [onTranscript, startAudioMeter]);
 
   // ── Stop ──
   const stop = useCallback(() => {
     wantListeningRef.current = false;
+    stopAudioMeter();
 
     // Stop Web Speech API
     const rec = recognitionRef.current;
@@ -315,7 +367,7 @@ function useVoiceInput(onTranscript: (text: string) => void) {
     setIsListening(false);
     setInterim("");
     setMode("idle");
-  }, []);
+  }, [stopAudioMeter]);
 
   // ── Toggle ──
   const toggle = useCallback(() => {
@@ -357,6 +409,7 @@ function useVoiceInput(onTranscript: (text: string) => void) {
   useEffect(() => {
     return () => {
       wantListeningRef.current = false;
+      stopAudioMeter();
       const rec = recognitionRef.current;
       recognitionRef.current = null;
       if (rec) {
@@ -372,7 +425,7 @@ function useVoiceInput(onTranscript: (text: string) => void) {
         streamRef.current = null;
       }
     };
-  }, []);
+  }, [stopAudioMeter]);
 
   return {
     isListening,
@@ -381,6 +434,7 @@ function useVoiceInput(onTranscript: (text: string) => void) {
     isSupported,
     error,
     mode,
+    audioLevel,
     toggle,
     stop,
     clearError,
@@ -452,12 +506,29 @@ export function ChatInput({
           </button>
         </div>
       )}
+      {/* Voice morph animation — shown above input when listening */}
+      {voice.isListening && (
+        <div className="flex justify-center mb-2">
+          <button
+            onClick={voice.toggle}
+            className="cursor-pointer focus:outline-none"
+            title="Click to stop recording"
+          >
+            <VoiceMorph
+              audioLevel={voice.audioLevel}
+              isActive={voice.isListening}
+              className="w-48 h-16"
+            />
+          </button>
+        </div>
+      )}
+
       <div
         className={cn(
           "flex items-end gap-2 rounded-3xl border border-[#444444] bg-[#1F2023] px-3 py-2",
           "shadow-[0_8px_30px_rgba(0,0,0,0.24)] transition-all duration-300",
           "focus-within:border-[#555555]",
-          voice.isListening && "border-red-500/50 shadow-[0_0_20px_rgba(239,68,68,0.15)]"
+          voice.isListening && "border-purple-500/50 shadow-[0_0_20px_rgba(168,85,247,0.15)]"
         )}
       >
         {/* Voice input button */}
@@ -476,7 +547,7 @@ export function ChatInput({
                   voice.isTranscribing
                     ? "bg-amber-500/20 text-amber-400"
                     : voice.isListening
-                      ? "bg-red-500/20 text-red-400 animate-pulse"
+                      ? "bg-purple-500/20 text-purple-400"
                       : "bg-transparent text-[#9CA3AF] hover:text-gray-200"
                 )}
               >
@@ -515,7 +586,7 @@ export function ChatInput({
               "focus-visible:outline-none focus-visible:ring-0",
               "disabled:cursor-not-allowed disabled:opacity-50",
               "min-h-[44px] resize-none",
-              voice.isListening && "placeholder:text-red-400/60"
+              voice.isListening && "placeholder:text-purple-400/60"
             )}
           />
           {/* Interim transcription preview */}
