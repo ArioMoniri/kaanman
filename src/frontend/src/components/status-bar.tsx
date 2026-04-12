@@ -51,6 +51,11 @@ const AGENT_LABELS: Record<string, string> = {
   decision_tree: "Decision Tree Generator",
   trust_scorer: "Trust Scorer",
   phi_check: "PHI Verification",
+  izlem_fetch: "İzlem Fetch",
+  izlem_index: "İzlem Indexing",
+  izlem: "İzlem Analysis",
+  izlem_pdf: "İzlem PDF Brief",
+  prescription: "Prescription",
 };
 
 const AGENT_DESCRIPTIONS: Record<string, string> = {
@@ -70,6 +75,11 @@ const AGENT_DESCRIPTIONS: Record<string, string> = {
   decision_tree: "Build clinical decision tree as React Flow diagram",
   trust_scorer: "Evaluate answer confidence across 6 trust dimensions",
   phi_check: "Regex-based PHI scan on final output",
+  izlem_fetch: "Fetch monitoring/izlem data from Cerebral Plus EHR",
+  izlem_index: "Index izlem records into RAG with Turkish tokenization",
+  izlem: "Analyze patient monitoring data (vitals, notes, medications)",
+  izlem_pdf: "Generate structured PDF brief of monitoring data",
+  prescription: "Write prescription based on drug analysis results",
 };
 
 interface PhaseGroup {
@@ -79,9 +89,9 @@ interface PhaseGroup {
 }
 
 const PHASES: PhaseGroup[] = [
-  { id: "intake", title: "Routing & Intake", agents: ["router", "patient_fetch", "reports_fetch", "episodes_fetch", "reports_index", "episodes_index"] },
-  { id: "council", title: "Agent Council", agents: ["clinical", "research", "drug", "reports", "episodes"] },
-  { id: "compose", title: "Composition", agents: ["composer_fast", "composer_complete", "decision_tree"] },
+  { id: "intake", title: "Routing & Intake", agents: ["router", "patient_fetch", "reports_fetch", "episodes_fetch", "reports_index", "episodes_index", "izlem_fetch", "izlem_index"] },
+  { id: "council", title: "Agent Council", agents: ["clinical", "research", "drug", "reports", "episodes", "izlem", "prescription"] },
+  { id: "compose", title: "Composition", agents: ["composer_fast", "composer_complete", "decision_tree", "izlem_pdf"] },
   { id: "validate", title: "Validation", agents: ["trust_scorer", "phi_check"] },
 ];
 

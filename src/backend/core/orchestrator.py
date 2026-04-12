@@ -89,6 +89,7 @@ AGENT_LABELS = {
     "izlem_fetch": "Fetching monitoring data...",
     "izlem_index": "Indexing monitoring records...",
     "izlem": "Analyzing monitoring data...",
+    "izlem_pdf": "Generating izlem PDF brief...",
 }
 
 
@@ -738,6 +739,41 @@ class Orchestrator:
                 })
 
             parallel_tasks.append(asyncio.create_task(_gen_decision_tree()))
+
+        # Izlem PDF brief generation (runs in parallel with compose/tree)
+        if route.needs_izlem and izlem_data and detected_pid:
+            async def _gen_izlem_pdf():
+                await self._emit(on_status, {
+                    "agent": "izlem_pdf", "status": "running",
+                    "message": "Generating izlem PDF brief...", "phase": "composing",
+                })
+                t0 = time.monotonic()
+                try:
+                    pdf_path = await self.izlem_agent.generate_pdf_brief(
+                        protocol_id=detected_pid,
+                        izlem_data=izlem_data,
+                        language=route.language,
+                    )
+                    elapsed = int((time.monotonic() - t0) * 1000)
+                    # Extract just the filename from the full path
+                    import os
+                    result.izlem_brief_pdf = os.path.basename(pdf_path)
+                    await self._emit(on_status, {
+                        "agent": "izlem_pdf", "status": "done",
+                        "time_ms": elapsed,
+                        "tokens": self.izlem_agent.last_usage,
+                        "message": "izlem PDF ready",
+                    })
+                except Exception as e:
+                    logging.getLogger("cerebralink.orchestrator").warning(
+                        "Izlem PDF generation failed: %s", e,
+                    )
+                    await self._emit(on_status, {
+                        "agent": "izlem_pdf", "status": "error",
+                        "message": f"izlem PDF failed: {e}",
+                    })
+
+            parallel_tasks.append(asyncio.create_task(_gen_izlem_pdf()))
 
         await asyncio.gather(*parallel_tasks, return_exceptions=True)
 

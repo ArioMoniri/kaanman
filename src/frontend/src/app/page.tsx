@@ -941,9 +941,39 @@ export default function Home() {
           {/* Spacer */}
           <div className="flex-1 min-w-0" />
 
-          {/* Navigation buttons — uniform compact style */}
+          {/* Navigation buttons — order: New Chat, History, Knowledge Graph, Lab Trends, Context Size, Legend */}
           <div className="flex items-center gap-1.5">
-            <ReferenceLegend />
+            <button
+              onClick={handleNewChat}
+              className="text-[11px] text-gray-400 hover:text-gray-200 transition-colors px-2 py-1 rounded-md border border-border/40 hover:border-border bg-surface/50 hover:bg-surface-light flex items-center gap-1"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              New Chat
+            </button>
+            <button
+              onClick={() => setShowHistory(true)}
+              className="text-[11px] text-indigo-400/80 hover:text-indigo-400 transition-colors px-2 py-1 rounded-md border border-indigo-500/25 hover:border-indigo-500/50 flex items-center gap-1 hover:bg-indigo-500/5"
+              title="Patient History"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+              History
+            </button>
+            {patientData && (
+              <button
+                onClick={() => setShowKnowledgeGraph(true)}
+                className="text-[11px] text-emerald-400/80 hover:text-emerald-400 transition-colors px-2 py-1 rounded-md border border-emerald-500/25 hover:border-emerald-500/50 flex items-center gap-1 hover:bg-emerald-500/5"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3" /><line x1="12" y1="1" x2="12" y2="5" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="4.22" y1="4.22" x2="7.05" y2="7.05" /><line x1="16.95" y1="16.95" x2="19.78" y2="19.78" /><line x1="1" y1="12" x2="5" y2="12" /><line x1="19" y1="12" x2="23" y2="12" />
+                </svg>
+                Knowledge Graph
+              </button>
+            )}
             {patientData && (
               <button
                 onClick={() => handleOpenTrend("")}
@@ -957,37 +987,7 @@ export default function Home() {
               </button>
             )}
             <ContextWindowBar messages={messages} agentStatuses={agentStatuses} />
-            {patientData && (
-              <button
-                onClick={() => setShowKnowledgeGraph(true)}
-                className="text-[11px] text-emerald-400/80 hover:text-emerald-400 transition-colors px-2 py-1 rounded-md border border-emerald-500/25 hover:border-emerald-500/50 flex items-center gap-1 hover:bg-emerald-500/5"
-              >
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="3" /><line x1="12" y1="1" x2="12" y2="5" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="4.22" y1="4.22" x2="7.05" y2="7.05" /><line x1="16.95" y1="16.95" x2="19.78" y2="19.78" /><line x1="1" y1="12" x2="5" y2="12" /><line x1="19" y1="12" x2="23" y2="12" />
-                </svg>
-                Knowledge Graph
-              </button>
-            )}
-            <button
-              onClick={() => setShowHistory(true)}
-              className="text-[11px] text-indigo-400/80 hover:text-indigo-400 transition-colors px-2 py-1 rounded-md border border-indigo-500/25 hover:border-indigo-500/50 flex items-center gap-1 hover:bg-indigo-500/5"
-              title="Patient History"
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <polyline points="12 6 12 12 16 14" />
-              </svg>
-              History
-            </button>
-            <button
-              onClick={handleNewChat}
-              className="text-[11px] text-gray-400 hover:text-gray-200 transition-colors px-2 py-1 rounded-md border border-border/40 hover:border-border bg-surface/50 hover:bg-surface-light flex items-center gap-1"
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              New Chat
-            </button>
+            <ReferenceLegend />
           </div>
         </header>
 

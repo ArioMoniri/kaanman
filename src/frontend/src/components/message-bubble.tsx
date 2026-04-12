@@ -123,10 +123,10 @@ const COUNTRY_FLAGS: Record<string, string> = {
 /** Map badge variant → explicit inline style colors for the impact pill.
  *  These are used with direct style= so they're immune to Tailwind purging & CSS caching. */
 const IMPACT_STYLES: Record<string, { bg: string; text: string; border: string; label: string }> = {
-  green:          { bg: "#16a34a", text: "#ffffff", border: "#22c55e", label: "High impact" },
-  blue:           { bg: "#2563eb", text: "#ffffff", border: "#3b82f6", label: "Moderate impact" },
+  green:          { bg: "rgba(22,163,74,0.25)", text: "#4ade80", border: "rgba(34,197,94,0.6)", label: "High impact" },
+  blue:           { bg: "rgba(37,99,235,0.25)", text: "#93c5fd", border: "rgba(59,130,246,0.6)", label: "Moderate impact" },
   "teal-subtle":  { bg: "rgba(20,184,166,0.25)", text: "#5eead4", border: "rgba(20,184,166,0.5)", label: "WHO / International" },
-  amber:          { bg: "#d97706", text: "#000000", border: "#f59e0b", label: "Priority country" },
+  amber:          { bg: "rgba(217,119,6,0.3)", text: "#fcd34d", border: "rgba(245,158,11,0.6)", label: "Priority country" },
   "purple-subtle":{ bg: "rgba(147,51,234,0.25)", text: "#c4b5fd", border: "rgba(147,51,234,0.5)", label: "Contextual" },
   "gray-subtle":  { bg: "rgba(107,114,128,0.2)", text: "#d1d5db", border: "rgba(107,114,128,0.4)", label: "Low impact" },
 };

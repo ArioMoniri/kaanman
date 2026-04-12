@@ -369,7 +369,9 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
   const nextId = () => `n${nid++}`;
 
   const patientInfo = (data.patient as Record<string, unknown>) || data;
-  const episodes = (data.episodes as Record<string, unknown>[]) || [];
+  const episodes = (data.episodes as Record<string, unknown>[])
+    || ((data.patient as Record<string, unknown>)?.episodes as Record<string, unknown>[])
+    || [];
 
   const CX = 0;
   const CY = 0;
@@ -415,11 +417,11 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     const epNodeId = nextId();
     episodeNodeIds.push(epNodeId);
 
-    const date = (ep.date as string) || "";
-    const service = (ep.service_name as string) || "Visit";
-    const doctor = (ep.doctor_name as string) || "";
-    const facility = (ep.facility_name as string) || "";
-    const episodeId = (ep.episode_id as string) || "";
+    const date = (ep.date as string) || (ep.episode_date as string) || (ep.admission_date as string) || "";
+    const service = (ep.service_name as string) || (ep.serviceName as string) || (ep.serviceText as string) || "Visit";
+    const doctor = (ep.doctor_name as string) || (ep.doctorName as string) || "";
+    const facility = (ep.facility_name as string) || (ep.facilityName as string) || (ep.facility_text as string) || "";
+    const episodeId = (ep.episode_id as string) || (ep.episodeId as string) || "";
 
     if (service) {
       if (!deptEpisodes.has(service)) deptEpisodes.set(service, { nodeIds: [], dates: [] });
@@ -440,10 +442,12 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
       facilityEpisodes.get(facility)!.push(epNodeId);
     }
 
-    const diagnoses = (ep.diagnosis as Record<string, unknown>[]) || [];
+    const diagnoses = (ep.diagnosis as Record<string, unknown>[])
+      || (ep.diagnoses as Record<string, unknown>[])
+      || [];
     diagnoses.forEach((d) => {
-      const dxName = (d.DiagnosisName as string) || (d.diagnosis_name as string) || "";
-      const icd = (d.ICDCode as string) || (d.icd_code as string) || "";
+      const dxName = (d.DiagnosisName as string) || (d.diagnosis_name as string) || (d.name as string) || "";
+      const icd = (d.ICDCode as string) || (d.icd_code as string) || (d.icdCode as string) || "";
       const key = icd || dxName;
       if (!key) return;
       if (!diagMap.has(key)) diagMap.set(key, { name: dxName, icd, episodeNodeIds: [], dates: [] });
@@ -452,8 +456,8 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     });
 
     const dxSummary = diagnoses.map((d) => {
-      const name = (d.DiagnosisName as string) || "";
-      const icd = (d.ICDCode as string) || "";
+      const name = (d.DiagnosisName as string) || (d.diagnosis_name as string) || (d.name as string) || "";
+      const icd = (d.ICDCode as string) || (d.icd_code as string) || (d.icdCode as string) || "";
       const desc = getIcdDescription(icd);
       if (icd && desc) return `${name} (${icd} - ${desc})`;
       if (icd) return `${name} (${icd})`;
@@ -876,23 +880,29 @@ function StatsBar({ data, onSelect }: { data: Record<string, unknown>; onSelect?
     return () => document.removeEventListener("mousedown", handler);
   }, [hoveredStat]);
 
-  const episodes = (data.episodes as Record<string, unknown>[]) || [];
+  // Support both top-level and nested patient.episodes structures
+  const rawEpisodes = (data.episodes as Record<string, unknown>[])
+    || ((data.patient as Record<string, unknown>)?.episodes as Record<string, unknown>[])
+    || [];
+  const episodes = rawEpisodes;
 
   const deptSet = new Map<string, number>();
   const diagSet = new Map<string, number>();
   const docSet = new Map<string, number>();
 
   episodes.forEach((ep) => {
-    const svc = (ep.service_name as string) || "";
+    const svc = (ep.service_name as string) || (ep.serviceName as string) || (ep.serviceText as string) || "";
     if (svc) deptSet.set(svc, (deptSet.get(svc) || 0) + 1);
 
-    const doc = (ep.doctor_name as string) || "";
+    const doc = (ep.doctor_name as string) || (ep.doctorName as string) || "";
     if (doc) docSet.set(doc, (docSet.get(doc) || 0) + 1);
 
-    const dxs = (ep.diagnosis as Record<string, unknown>[]) || [];
+    const dxs = (ep.diagnosis as Record<string, unknown>[])
+      || (ep.diagnoses as Record<string, unknown>[])
+      || [];
     dxs.forEach((d) => {
-      const name = (d.DiagnosisName as string) || "";
-      const icd = (d.ICDCode as string) || "";
+      const name = (d.DiagnosisName as string) || (d.diagnosis_name as string) || (d.name as string) || "";
+      const icd = (d.ICDCode as string) || (d.icd_code as string) || (d.icdCode as string) || "";
       const desc = getIcdDescription(icd);
       const label = icd
         ? `${name} (${icd}${desc ? ` - ${desc}` : ""})`
@@ -907,8 +917,8 @@ function StatsBar({ data, onSelect }: { data: Record<string, unknown>; onSelect?
 
   // Build episode list: date + department
   const episodeList: [string, number][] = episodes.map((ep) => {
-    const date = (ep.episode_date as string) || (ep.admission_date as string) || "";
-    const svc = (ep.service_name as string) || "";
+    const date = (ep.date as string) || (ep.episode_date as string) || (ep.admission_date as string) || "";
+    const svc = (ep.service_name as string) || (ep.serviceName as string) || (ep.serviceText as string) || "";
     const label = [date, svc].filter(Boolean).join(" — ");
     return [label || "Unknown", 1] as [string, number];
   }).slice(0, 50); // Limit to 50 most recent
