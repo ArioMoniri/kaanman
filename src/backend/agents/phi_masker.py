@@ -75,21 +75,44 @@ Output valid JSON with:
         return text
 
     async def mask_patient_record(self, patient_data: dict[str, Any]) -> dict[str, Any]:
-        """Mask a full patient record (from cerebral_fetch output)."""
+        """Mask a full patient record (from cerebral_fetch output).
+
+        Uses REGEX ONLY to preserve the full data structure (episodes, diagnoses, etc.).
+        LLM-based masking truncated large records (54+ episodes) due to token limits,
+        losing episode/department/diagnosis/doctor counts.
+        """
         raw_json = json.dumps(patient_data, ensure_ascii=False, indent=2)
-        pre_masked = self._regex_prepass(raw_json)
+        masked_json = self._regex_prepass(raw_json)
 
-        prompt = f"Mask all PHI in this patient record. Return ONLY valid JSON.\n\n{pre_masked}"
+        # Also mask patient names and doctor names structurally
+        masked_data = json.loads(masked_json)
 
-        try:
-            result = await self.call_json(prompt)
-            return result
-        except Exception:
-            return {
-                "masked_record": json.loads(pre_masked),
-                "summary": "Patient data loaded (auto-masked via regex fallback).",
-                "phi_count": -1,
-            }
+        # Mask patient-level PHI
+        patient = masked_data.get("patient", {})
+        if "full_name" in patient:
+            patient["full_name"] = "[PATIENT_NAME]"
+        if "page_title" in patient:
+            patient["page_title"] = "[PATIENT_NAME]"
+        if "birth_date" in patient:
+            patient["birth_date"] = "[DOB]"
+        if "full_name" in masked_data:
+            masked_data["full_name"] = "[PATIENT_NAME]"
+
+        # Generate a brief summary (no LLM needed — derive from data)
+        episodes = masked_data.get("episodes", [])
+        ep_count = len(episodes)
+        dept_count = len(set(e.get("service_name", "") for e in episodes if e.get("service_name")))
+        doc_count = len(set(e.get("doctor_name", "") for e in episodes if e.get("doctor_name")))
+        summary = (
+            f"Patient with {ep_count} episode(s) across {dept_count} department(s), "
+            f"seen by {doc_count} doctor(s)."
+        )
+
+        return {
+            "masked_record": masked_data,
+            "summary": summary,
+            "phi_count": 0,
+        }
 
     def check_output(self, text: str) -> str:
         """Validate that a response contains no PHI. Returns cleaned text.

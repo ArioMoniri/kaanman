@@ -795,7 +795,7 @@ export function MessageBubble({
   onOpenIzlemPdf,
 }: MessageBubbleProps) {
   const [mode, setMode] = useState<"fast" | "complete" | "highlight">("fast");
-  const [showCitations, setShowCitations] = useState(false);
+  const [showCitations, setShowCitations] = useState(true);
   const [copied, setCopied] = useState(false);
 
   if (message.role === "user") {
@@ -884,44 +884,77 @@ export function MessageBubble({
           </div>
         )}
 
-        {/* Mode tabs + action buttons row */}
+        {/* Mode tabs + İzlem Brief + action buttons row */}
         <div className="flex items-center justify-between px-5 pt-3 pb-2 gap-2 flex-wrap">
-          {hasDualMode ? (
-            <div className="flex gap-1 p-0.5 bg-surface rounded-lg w-fit">
-              <button
-                onClick={() => setMode("fast")}
-                className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
-                  mode === "fast"
-                    ? "bg-accent text-white"
-                    : "text-gray-400 hover:text-gray-200"
-                }`}
-              >
-                Fast
-              </button>
-              <button
-                onClick={() => setMode("complete")}
-                className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
-                  mode === "complete"
-                    ? "bg-accent text-white"
-                    : "text-gray-400 hover:text-gray-200"
-                }`}
-              >
-                Complete
-              </button>
-              <button
-                onClick={() => setMode("highlight")}
-                className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
-                  mode === "highlight"
-                    ? "bg-amber-500 text-white"
-                    : "text-gray-400 hover:text-gray-200"
-                }`}
-              >
-                Highlights
-              </button>
-            </div>
-          ) : (
-            <div />
-          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            {hasDualMode ? (
+              <div className="flex gap-1 p-0.5 bg-surface rounded-lg w-fit">
+                <button
+                  onClick={() => setMode("fast")}
+                  className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+                    mode === "fast"
+                      ? "bg-accent text-white"
+                      : "text-gray-400 hover:text-gray-200"
+                  }`}
+                >
+                  Fast
+                </button>
+                <button
+                  onClick={() => setMode("complete")}
+                  className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+                    mode === "complete"
+                      ? "bg-accent text-white"
+                      : "text-gray-400 hover:text-gray-200"
+                  }`}
+                >
+                  Complete
+                </button>
+                <button
+                  onClick={() => setMode("highlight")}
+                  className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+                    mode === "highlight"
+                      ? "bg-amber-500 text-white"
+                      : "text-gray-400 hover:text-gray-200"
+                  }`}
+                >
+                  Highlights
+                </button>
+              </div>
+            ) : (
+              <div />
+            )}
+            {/* İzlem Brief — prominent, next to tabs with preview + download */}
+            {message.izlem_brief_pdf && onOpenIzlemPdf && (
+              <div className="flex items-center gap-1 p-0.5 bg-rose-500/10 rounded-lg border border-rose-500/25">
+                <button
+                  onClick={() => onOpenIzlemPdf(message.izlem_brief_pdf!)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold text-rose-300 hover:bg-rose-500/20 transition-all"
+                  title="Preview İzlem Brief PDF"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  İzlem Brief
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? '';
+                    const pdfFile = message.izlem_brief_pdf!;
+                    const match = pdfFile.match(/izlem_brief_(\d+)_/);
+                    const pid = match ? match[1] : '';
+                    if (pid) {
+                      window.open(`${apiUrl}/api/izlem/${pid}/pdf/${pdfFile}`, '_blank');
+                    } else {
+                      onOpenIzlemPdf(pdfFile);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold text-rose-400/70 hover:text-rose-300 hover:bg-rose-500/20 transition-all cursor-pointer"
+                  title="Download İzlem Brief PDF"
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                </button>
+              </div>
+            )}
+          </div>
 
           <div className="flex items-center gap-1 flex-wrap">
             {/* Copy */}
@@ -970,16 +1003,6 @@ export function MessageBubble({
               >
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="5" r="3"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="13" x2="6" y2="17"/><line x1="12" y1="13" x2="18" y2="17"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/></svg>
                 Decision Tree
-              </button>
-            )}
-            {/* Izlem Brief */}
-            {message.izlem_brief_pdf && onOpenIzlemPdf && (
-              <button
-                onClick={() => onOpenIzlemPdf(message.izlem_brief_pdf!)}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/10 text-rose-400/80 hover:bg-rose-500/20 hover:text-rose-400 border border-rose-500/20 transition-all"
-              >
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                İzlem Brief
               </button>
             )}
           </div>
