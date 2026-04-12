@@ -232,6 +232,14 @@ Set needs_decision_tree=true when the query involves:
             if not decision.category or decision.category in ("GENERAL", "GREETING", "OFF_TOPIC"):
                 decision.category = "CLINICAL_REASONING"
 
+        # Hard override: always enable research for medical queries so that
+        # structured citations/guidelines are populated in the response.
+        # Without research, the KAYNAKLAR section in the answer text has
+        # references but the structured citations[] array stays empty,
+        # meaning impact badges never render.
+        if decision.is_medical and not decision.needs_research:
+            decision.needs_research = True
+
         # Hard override: Turkish language detection — LLM sometimes misdetects
         # Turkish as English or another language, causing wrong priority_country.
         is_turkish = _detect_turkish(message)

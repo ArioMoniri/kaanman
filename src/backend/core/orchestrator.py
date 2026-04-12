@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 import traceback
 from typing import Any, Callable, Awaitable
@@ -808,6 +809,37 @@ class Orchestrator:
             parallel_tasks.append(asyncio.create_task(_gen_izlem_pdf()))
 
         await asyncio.gather(*parallel_tasks, return_exceptions=True)
+
+        # ── 6b. Fallback İzlem PDF from answer text when raw izlem data unavailable ──
+        if (route.needs_izlem and detected_pid
+                and not result.izlem_brief_pdf
+                and result.complete_answer):
+            try:
+                from src.backend.tools.izlem_pdf import create_izlem_pdf_from_answer
+                await self._emit(on_status, {
+                    "agent": "izlem_pdf", "status": "running",
+                    "message": "Generating izlem PDF from analysis...",
+                    "phase": "composing",
+                })
+                t0 = time.monotonic()
+                pdf_path = await create_izlem_pdf_from_answer(
+                    protocol_id=detected_pid,
+                    answer_text=result.complete_answer,
+                    language=route.language,
+                )
+                elapsed = int((time.monotonic() - t0) * 1000)
+                result.izlem_brief_pdf = os.path.basename(pdf_path)
+                result.agents_used.append("izlem_pdf")
+                result.agent_timings.append(AgentTiming(agent="izlem_pdf", time_ms=elapsed))
+                await self._emit(on_status, {
+                    "agent": "izlem_pdf", "status": "done",
+                    "time_ms": elapsed,
+                    "message": "İzlem PDF ready (from analysis)",
+                })
+            except Exception as e:
+                logging.getLogger("cerebralink.orchestrator").warning(
+                    "Fallback izlem PDF generation failed: %s", e,
+                )
 
         # ── 7. Trust scoring ──
         await self._emit(on_status, {

@@ -378,3 +378,65 @@ async def create_izlem_pdf(
     doc.close()
     log.info("Created izlem PDF: %s", pdf_path)
     return str(pdf_path)
+
+
+async def create_izlem_pdf_from_answer(
+    protocol_id: str,
+    answer_text: str,
+    language: str = "en",
+    output_dir: str | None = None,
+) -> str:
+    """Create a PDF from the LLM's izlem answer text (fallback when raw data unavailable).
+
+    Used when izlem data can't be fetched from EHR (expired cookies, etc.)
+    but the LLM still generated a monitoring summary from patient context.
+    """
+    now = datetime.now()
+    ts = now.strftime("%Y%m%d_%H%M%S")
+    out = Path(output_dir) if output_dir else DATA_DIR / f"izlem_{protocol_id}"
+    out.mkdir(parents=True, exist_ok=True)
+    pdf_path = out / f"izlem_brief_{protocol_id}_{ts}.pdf"
+
+    doc = fitz.open()
+    w = _W(doc)
+
+    # --- Title page ---
+    w.new_page()
+    title = "Hasta İzlem Özeti" if language == "tr" else "Patient Monitoring Brief"
+    w.text(title, fs=16, bold=True, color=_BLUE)
+    w.y += 4
+    w.text(f"Protocol: {protocol_id}", fs=12, bold=True, color=_DGRAY)
+    w.text(f"Generated: {now.strftime('%Y-%m-%d %H:%M')}", fs=9, color=_GRAY)
+    w.y += 2
+    note = ("Not: Bu özet, mevcut hasta verileri ve klinik geçmişten oluşturulmuştur."
+            if language == "tr"
+            else "Note: Generated from available patient data and clinical history.")
+    w.text(note, fs=8, color=_GRAY)
+    w.y += 6
+    w.sep()
+
+    # --- Write the LLM answer as structured text ---
+    # Strip markdown formatting for cleaner PDF
+    import re
+    clean = answer_text
+    # Remove markdown bold/italic markers
+    clean = re.sub(r'\*{1,3}([^*]+)\*{1,3}', r'\1', clean)
+    # Remove [N] citation references
+    clean = re.sub(r'\[\d+\]', '', clean)
+    # Remove markdown links [text](url)
+    clean = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', clean)
+
+    _write_brief_text(w, clean)
+
+    # Footer on every page
+    for i in range(len(doc)):
+        doc[i].insert_text(
+            fitz.Point(_ML, _PH - 20),
+            f"CerebraLink Izlem Brief -- Protocol {protocol_id} -- "
+            f"Page {i + 1}/{len(doc)} -- {now.strftime('%Y-%m-%d %H:%M')}",
+            fontsize=7, fontname="helv", color=_GRAY)
+
+    doc.save(str(pdf_path))
+    doc.close()
+    log.info("Created izlem PDF from answer text: %s", pdf_path)
+    return str(pdf_path)
