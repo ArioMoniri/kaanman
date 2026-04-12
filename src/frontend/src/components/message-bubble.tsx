@@ -799,11 +799,30 @@ export function MessageBubble({
   const [showCitations, setShowCitations] = useState(true);
   const [copied, setCopied] = useState(false);
 
+  const [userCopied, setUserCopied] = useState(false);
+
   if (message.role === "user") {
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-accent/90 px-4 py-2.5 text-base text-white">
+      <div className="flex justify-end group/user">
+        <div className="relative max-w-[85%] rounded-2xl rounded-br-md bg-accent/90 px-4 py-2.5 text-base text-white">
           {message.content}
+          <button
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(message.content);
+                setUserCopied(true);
+                setTimeout(() => setUserCopied(false), 2000);
+              } catch {}
+            }}
+            className="absolute -left-8 top-1/2 -translate-y-1/2 opacity-0 group-hover/user:opacity-100 transition-opacity p-1 rounded hover:bg-white/10"
+            title="Copy message"
+          >
+            {userCopied ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-green-300"><polyline points="20 6 9 17 4 12"/></svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/60"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            )}
+          </button>
         </div>
       </div>
     );
