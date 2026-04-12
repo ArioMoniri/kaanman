@@ -93,7 +93,10 @@ function useVoiceInput(onTranscript: (text: string) => void) {
     const recognition = new SR();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = navigator.language || "en-US";
+    // Don't force a language — let the browser auto-detect the spoken language.
+    // This enables Turkish, English, Arabic, etc. without user configuration.
+    // If the browser's speech engine struggles, the MediaRecorder → Whisper
+    // fallback provides excellent multilingual auto-detection.
 
     let finalTranscript = "";
 
@@ -333,14 +336,16 @@ function useVoiceInput(onTranscript: (text: string) => void) {
       return;
     }
 
-    // Try Web Speech API first
+    // Prefer Whisper (recorder mode) for multilingual auto-detection.
+    // Web Speech API is only used as fallback when backend is unavailable.
     const hasSR =
       typeof window !== "undefined" &&
       ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
-    if (hasSR) {
-      startWebSpeech();
-    } else if (backendAvailableRef.current) {
+    if (backendAvailableRef.current) {
+      // Whisper supports 100+ languages with auto-detection
       startRecorder();
+    } else if (hasSR) {
+      startWebSpeech();
     } else {
       setError("Voice input not available in this browser");
     }

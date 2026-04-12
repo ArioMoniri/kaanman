@@ -16,7 +16,7 @@ interface ReportViewerProps {
   /** Accession number for direct PACS access */
   accessionNumber?: string;
   /** Override base URL path for file serving (e.g., "episodes" instead of "reports") */
-  fileEndpointType?: "reports" | "episodes";
+  fileEndpointType?: "reports" | "episodes" | "izlem";
 }
 
 /** Scrolls to and highlights the first occurrence of `text` in the container */
@@ -139,7 +139,9 @@ export function ReportViewer({
     }
   }, [protocolId, reportId, accessionNumber]);
 
-  const fileBase = `${API_URL}/api/${fileEndpointType}/${protocolId}/file`;
+  const fileBase = fileEndpointType === "izlem"
+    ? `${API_URL}/api/izlem/${protocolId}/pdf`
+    : `${API_URL}/api/${fileEndpointType}/${protocolId}/file`;
   const pdfUrl = `${fileBase}/${encodeURIComponent(file)}`;
   const txtUrl = textFile
     ? `${fileBase}/${encodeURIComponent(textFile)}`

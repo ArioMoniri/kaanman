@@ -13,6 +13,10 @@ venv/
 cookies/*.json
 !cookies/.gitkeep
 patient_*.json
+izlem_*.json
+ilac.json
 *.log
 .DS_Store
 redis-data/
+.claude/
+src/frontend/tsconfig.tsbuildinfo

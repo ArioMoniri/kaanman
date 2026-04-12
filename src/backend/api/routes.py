@@ -63,11 +63,23 @@ from src.backend.tools.graph import (
 )
 from src.backend.agents.reports import ReportsAgent
 from src.backend.agents.episodes import EpisodesAgent
+from src.backend.tools.izlem import (
+    auto_fetch_izlem,
+    izlem_exists,
+    get_izlem_data,
+    get_izlem_dir,
+)
+from src.backend.tools.izlem_rag import (
+    index_izlem,
+    search_izlem as rag_search_izlem,
+)
+from src.backend.agents.izlem import IzlemAgent
 
 router = APIRouter()
 _orchestrator = Orchestrator()
 _reports_agent = ReportsAgent()
 _episodes_agent = EpisodesAgent()
+_izlem_agent = IzlemAgent()
 
 
 @router.post("/api/chat", response_model=ChatResponse)
@@ -448,6 +460,30 @@ async def get_patient_brief(protocol_id: str):
     return {"protocol_id": protocol_id, "brief": brief}
 
 
+# ── Reader-mode proxy for X-Frame-Options blocked sites ──
+
+
+@router.get("/api/reader")
+async def reader_proxy(url: str):
+    """Fetch a URL and return extracted article content as clean HTML.
+
+    Used by the frontend when an iframe is blocked by X-Frame-Options.
+    Extracts title, author, date, main content, and metadata.
+    Results are cached for 10 minutes.
+    """
+    if not url or not url.startswith("http"):
+        raise HTTPException(400, "Valid HTTP(S) URL required")
+
+    from src.backend.tools.reader_proxy import fetch_and_extract
+
+    try:
+        result = await fetch_and_extract(url)
+    except Exception as e:
+        raise HTTPException(502, f"Could not fetch article: {str(e)[:200]}")
+
+    return result
+
+
 # ── PACS Viewer Links ──
 
 
@@ -672,6 +708,154 @@ async def cross_match_endpoint(protocol_id: str):
         "total_matches": len(matches),
         "matches": matches,
     }
+
+
+# ── Izlem (Monitoring Data) ──
+
+
+class IzlemSearchRequest(BaseModel):
+    query: str
+    limit: int = 5
+    data_type: str | None = None  # "vitals", "meds", "doctor_notes", "nurse_notes", or null (all)
+
+
+@router.post("/api/izlem/fetch/{protocol_id}")
+async def fetch_izlem_endpoint(protocol_id: str, refresh: bool = False):
+    """Fetch izlem (monitoring) data for a patient.
+
+    Downloads monitoring notes, vitals, medication admin records,
+    indexes them for search, and returns a summary.
+    """
+    if not refresh and izlem_exists(protocol_id):
+        izlem_data = get_izlem_data(protocol_id)
+        if izlem_data:
+            ep_count = len(izlem_data.get("episodes", []))
+            return {
+                "success": True,
+                "protocol_id": protocol_id,
+                "total_episodes": ep_count,
+                "from_cache": True,
+            }
+
+    try:
+        izlem_data = await auto_fetch_izlem(protocol_id, refresh=refresh)
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e))
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+
+    if not izlem_data:
+        raise HTTPException(404, f"No monitoring data found for protocol {protocol_id}")
+
+    # Index for RAG search
+    try:
+        await index_izlem(protocol_id, izlem_data)
+    except Exception:
+        pass  # Indexing is best-effort
+
+    ep_count = len(izlem_data.get("episodes", []))
+    return {
+        "success": True,
+        "protocol_id": protocol_id,
+        "total_episodes": ep_count,
+        "from_cache": False,
+    }
+
+
+@router.get("/api/izlem/{protocol_id}/data")
+async def get_izlem_data_endpoint(protocol_id: str):
+    """Return raw izlem data for a patient."""
+    if not izlem_exists(protocol_id):
+        raise HTTPException(404, f"No monitoring data found for protocol {protocol_id}")
+
+    izlem_data = get_izlem_data(protocol_id)
+    if not izlem_data:
+        raise HTTPException(404, f"No monitoring data found for protocol {protocol_id}")
+
+    episodes = izlem_data.get("episodes", [])
+    return {
+        "protocol_id": protocol_id,
+        "meta": izlem_data.get("meta", {}),
+        "total_episodes": len(episodes),
+        "episodes": episodes,
+    }
+
+
+@router.post("/api/izlem/{protocol_id}/search")
+async def search_izlem_endpoint(protocol_id: str, req: IzlemSearchRequest):
+    """Search izlem data using RAG."""
+    if not izlem_exists(protocol_id):
+        raise HTTPException(404, f"No monitoring data indexed for protocol {protocol_id}")
+
+    results = await rag_search_izlem(
+        protocol_id, req.query, limit=req.limit, data_type=req.data_type,
+    )
+    return {
+        "protocol_id": protocol_id,
+        "query": req.query,
+        "data_type": req.data_type,
+        "results": results,
+        "total": len(results),
+    }
+
+
+@router.post("/api/izlem/{protocol_id}/brief")
+async def generate_izlem_brief(protocol_id: str, language: str = "en"):
+    """Generate and return a PDF brief of patient monitoring data."""
+    if not izlem_exists(protocol_id):
+        raise HTTPException(404, f"No monitoring data found for protocol {protocol_id}")
+
+    izlem_data = get_izlem_data(protocol_id)
+    if not izlem_data:
+        raise HTTPException(404, f"No monitoring data found for protocol {protocol_id}")
+
+    try:
+        pdf_path = await _izlem_agent.generate_pdf_brief(
+            protocol_id=protocol_id,
+            izlem_data=izlem_data,
+            language=language,
+        )
+    except Exception as e:
+        raise HTTPException(500, f"PDF generation failed: {str(e)[:200]}")
+
+    return {
+        "success": True,
+        "protocol_id": protocol_id,
+        "pdf_path": str(pdf_path),
+        "filename": Path(pdf_path).name if pdf_path else None,
+    }
+
+
+@router.get("/api/izlem/{protocol_id}/pdf/{filename}")
+async def serve_izlem_pdf(protocol_id: str, filename: str):
+    """Serve a generated izlem PDF brief."""
+    izlem_dir = get_izlem_dir(protocol_id)
+    file_path = izlem_dir / filename
+
+    # Security: prevent directory traversal
+    try:
+        file_path = file_path.resolve()
+        izlem_dir_resolved = izlem_dir.resolve()
+    except Exception:
+        raise HTTPException(403, "Invalid path")
+
+    if not str(file_path).startswith(str(izlem_dir_resolved)):
+        raise HTTPException(403, "Access denied")
+
+    if not file_path.exists():
+        raise HTTPException(404, f"File not found: {filename}")
+
+    from urllib.parse import quote
+    ascii_name = filename.encode("ascii", "replace").decode("ascii")
+    utf8_name = quote(filename, safe="")
+    headers = {
+        "Content-Disposition": f"inline; filename=\"{ascii_name}\"; filename*=UTF-8''{utf8_name}"
+    }
+    return FileResponse(
+        path=str(file_path),
+        media_type="application/pdf",
+        headers=headers,
+    )
 
 
 # ── Knowledge Graph (Neo4j) ──

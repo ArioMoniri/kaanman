@@ -95,6 +95,7 @@ class ChatResponse(BaseModel):
     language: str = "en"
     priority_country: str = ""
     patient_context: dict | None = None
+    izlem_brief_pdf: str | None = None  # Path to generated izlem PDF brief
 
 
 class PatientIngestRequest(BaseModel):

@@ -860,7 +860,7 @@ function Legend({ hiddenCategories, onToggleCategory }: {
 /*  Stats bar with hover dropdown lists                                */
 /* ------------------------------------------------------------------ */
 
-function StatsBar({ data }: { data: Record<string, unknown> }) {
+function StatsBar({ data, onSelect }: { data: Record<string, unknown>; onSelect?: (label: string, category: string) => void }) {
   const [hoveredStat, setHoveredStat] = useState<string | null>(null);
   const statsRef = useRef<HTMLDivElement>(null);
 
@@ -905,8 +905,16 @@ function StatsBar({ data }: { data: Record<string, unknown> }) {
   const sortedDiags = Array.from(diagSet.entries()).sort((a, b) => b[1] - a[1]);
   const sortedDocs = Array.from(docSet.entries()).sort((a, b) => b[1] - a[1]);
 
+  // Build episode list: date + department
+  const episodeList: [string, number][] = episodes.map((ep) => {
+    const date = (ep.episode_date as string) || (ep.admission_date as string) || "";
+    const svc = (ep.service_name as string) || "";
+    const label = [date, svc].filter(Boolean).join(" — ");
+    return [label || "Unknown", 1] as [string, number];
+  }).slice(0, 50); // Limit to 50 most recent
+
   const stats: { label: string; value: number; color: string; list: [string, number][] }[] = [
-    { label: "Episodes", value: episodes.length, color: COLORS.episode.border, list: [] },
+    { label: "Episodes", value: episodes.length, color: COLORS.episode.border, list: episodeList },
     { label: "Departments", value: deptSet.size, color: COLORS.department.border, list: sortedDepts },
     { label: "Diagnoses", value: diagSet.size, color: COLORS.diagnosis.border, list: sortedDiags },
     { label: "Doctors", value: docSet.size, color: COLORS.doctor.border, list: sortedDocs },
@@ -975,32 +983,54 @@ function StatsBar({ data }: { data: Record<string, unknown> }) {
                 {label} ({list.length})
               </div>
               {list.map(([name, count], i) => (
-                <div
+                <button
                   key={i}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onSelect) {
+                      // Extract clean name: remove ICD code parenthetical for diagnoses, count suffixes, etc.
+                      const cleanName = name.replace(/\s*\(.*$/, "").trim();
+                      onSelect(cleanName, label);
+                      setHoveredStat(null);
+                    }
+                  }}
                   style={{
+                    width: "100%",
+                    textAlign: "left",
                     fontSize: 11,
                     color: "#d1d5db",
                     padding: "6px 14px",
                     borderBottom: i < list.length - 1 ? "1px solid rgba(255,255,255,0.03)" : "none",
                     display: "flex",
                     justifyContent: "space-between",
+                    alignItems: "center",
                     gap: 10,
                     transition: "background 0.15s",
+                    border: "none",
+                    background: "transparent",
+                    cursor: onSelect ? "pointer" : "default",
                   }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.04)"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = `${color}18`; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                  title={onSelect ? `Filter graph to: ${name}` : name}
                 >
-                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{name}</span>
-                  <span style={{
-                    color,
-                    flexShrink: 0,
-                    fontWeight: 600,
-                    fontSize: 10,
-                    background: `${color}15`,
-                    padding: "1px 6px",
-                    borderRadius: 6,
-                  }}>{count}x</span>
-                </div>
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                    <span style={{
+                      color,
+                      fontWeight: 600,
+                      fontSize: 10,
+                      background: `${color}15`,
+                      padding: "1px 6px",
+                      borderRadius: 6,
+                    }}>{count}x</span>
+                    {onSelect && (
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
+                        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                      </svg>
+                    )}
+                  </div>
+                </button>
               ))}
             </div>
           )}
@@ -1040,6 +1070,8 @@ export function KnowledgeGraph({
   const [graphSource, setGraphSource] = useState<"local" | "neo4j">("local");
   const [hiddenCategories, setHiddenCategories] = useState<Set<NodeCategory>>(new Set());
   const [focusIsolation, setFocusIsolation] = useState(!!focusLabel);
+  // Local focus label set by clicking stats dropdown items (overrides deep-link focusLabel)
+  const [localFocusLabel, setLocalFocusLabel] = useState<string | null>(null);
 
   // Update tab when focusLabel changes (e.g., user clicks a different deep link while KG is open)
   useEffect(() => {
@@ -1047,8 +1079,57 @@ export function KnowledgeGraph({
     else if (focusMatchesEpisode) setActiveTab("episodes");
     else if (focusLabel) setActiveTab("patient");
     // Re-enable isolation when a new focus label arrives
-    if (focusLabel) setFocusIsolation(true);
+    if (focusLabel) {
+      setFocusIsolation(true);
+      setLocalFocusLabel(null); // deep-link overrides local
+    }
   }, [focusLabel, focusMatchesReport, focusMatchesEpisode]);
+
+  // Effective focus label: local (from stats click) takes priority over deep-link
+  const effectiveFocusLabel = localFocusLabel || focusLabel;
+
+  // Handler for stats dropdown item click → filter & zoom
+  const handleStatsSelect = useCallback((label: string, _category: string) => {
+    setLocalFocusLabel(label);
+    setFocusIsolation(true);
+    initialFocusDoneRef.current = false; // allow re-zoom
+    // Force ReactFlow to re-zoom by triggering a node update
+    setTimeout(() => {
+      if (rfInstance.current) {
+        // Calculate centroid of matching nodes and zoom
+        const currentNodes = rfInstance.current.getNodes();
+        const target = label.toLowerCase();
+        const targetWords = target.split(/\s+/).filter(w => w.length >= 3);
+
+        const matchingNodes = currentNodes.filter(n => {
+          const d = n.data as GraphNodeData;
+          const text = [
+            d.label.toLowerCase(),
+            d.subtitle?.toLowerCase() || "",
+            ...(d.meta ? Object.values(d.meta).map(v => v.toLowerCase()) : []),
+            ...(d.detailList ? d.detailList.map(item => item.toLowerCase()) : []),
+          ].join(" ");
+          return text.includes(target) || (targetWords.length > 0 && targetWords.some(w => text.includes(w)));
+        });
+
+        if (matchingNodes.length > 0) {
+          let cx = 0, cy = 0;
+          matchingNodes.forEach(n => { cx += n.position.x; cy += n.position.y; });
+          cx /= matchingNodes.length;
+          cy /= matchingNodes.length;
+
+          // Adaptive zoom based on spread
+          let maxDist = 0;
+          matchingNodes.forEach(n => {
+            const dist = Math.sqrt((n.position.x - cx) ** 2 + (n.position.y - cy) ** 2);
+            if (dist > maxDist) maxDist = dist;
+          });
+          const zoom = maxDist > 500 ? 0.5 : maxDist > 300 ? 0.75 : maxDist > 150 ? 1.0 : 1.2;
+          rfInstance.current.setCenter(cx + 60, cy + 20, { zoom, duration: 800 });
+        }
+      }
+    }, 300);
+  }, []);
 
   const toggleCategory = useCallback((cat: NodeCategory) => {
     setHiddenCategories((prev) => {
@@ -1138,13 +1219,13 @@ export function KnowledgeGraph({
   // When deep-linked focus is active, stay on inline graph to preserve
   // focus matching — Neo4j node labels may differ from inline, causing
   // focus to fail and the view to revert to unfiltered
-  const initialGraph = (focusLabel && focusIsolation) ? inlineGraph : (neo4jGraph || inlineGraph);
+  const initialGraph = (effectiveFocusLabel && focusIsolation) ? inlineGraph : (neo4jGraph || inlineGraph);
 
   // If focusLabel is provided and isolation is active, mark matching nodes as focused,
   // their neighbors as related, and everything else as dimmed
   const nodesWithFocus = useMemo(() => {
-    if (!focusLabel || !focusIsolation) return initialGraph.nodes;
-    const target = focusLabel.toLowerCase();
+    if (!effectiveFocusLabel || !focusIsolation) return initialGraph.nodes;
+    const target = effectiveFocusLabel.toLowerCase();
 
     // Split multi-word targets into individual words for broader matching
     const targetWords = target.split(/\s+/).filter((w) => w.length >= 3);
@@ -1205,7 +1286,7 @@ export function KnowledgeGraph({
       }
       return { ...n, data: { ...d, focused: false, dimmed: true } };
     });
-  }, [initialGraph.nodes, initialGraph.edges, focusLabel, focusIsolation]);
+  }, [initialGraph.nodes, initialGraph.edges, effectiveFocusLabel, focusIsolation]);
 
   // Filter by hidden categories
   const filteredNodes = useMemo(() => {
@@ -1233,7 +1314,7 @@ export function KnowledgeGraph({
       edges = edges.filter((e) => filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target));
     }
     // Dim edges connected to dimmed nodes
-    if (focusLabel && focusIsolation && dimmedNodeIds.size > 0) {
+    if (effectiveFocusLabel && focusIsolation && dimmedNodeIds.size > 0) {
       edges = edges.map((e) => {
         const isDimEdge = dimmedNodeIds.has(e.source) || dimmedNodeIds.has(e.target);
         if (isDimEdge) {
@@ -1247,7 +1328,7 @@ export function KnowledgeGraph({
       });
     }
     return edges;
-  }, [initialGraph.edges, hiddenCategories, filteredNodeIds, focusLabel, focusIsolation, dimmedNodeIds]);
+  }, [initialGraph.edges, hiddenCategories, filteredNodeIds, effectiveFocusLabel, focusIsolation, dimmedNodeIds]);
 
   const [nodes, setNodes] = useState<Node[]>(filteredNodes);
   const edges = filteredEdges;
@@ -1276,12 +1357,12 @@ export function KnowledgeGraph({
     prevHiddenRef.current = hiddenCategories;
     prevTabRef.current = activeTab;
     if (!hiddenChanged && !tabChanged) return; // only refit on user actions
-    if (rfInstance.current && activeTab === "patient" && !(focusLabel && focusIsolation)) {
+    if (rfInstance.current && activeTab === "patient" && !(effectiveFocusLabel && focusIsolation)) {
       setTimeout(() => {
         rfInstance.current?.fitView({ padding: 0.15, duration: 400, maxZoom: 0.85 });
       }, 250);
     }
-  }, [hiddenCategories, activeTab, focusLabel, focusIsolation]);
+  }, [hiddenCategories, activeTab, effectiveFocusLabel, focusIsolation]);
 
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
@@ -1416,9 +1497,16 @@ export function KnowledgeGraph({
                   ? `${reportManifest?.length || 0} reports`
                   : `${episodeManifest?.length || 0} episodes`}
             </span>
-            {focusLabel && activeTab === "patient" && (
+            {effectiveFocusLabel && activeTab === "patient" && (
               <button
-                onClick={() => setFocusIsolation(!focusIsolation)}
+                onClick={() => {
+                  if (focusIsolation) {
+                    setFocusIsolation(false);
+                    setLocalFocusLabel(null);
+                  } else {
+                    setFocusIsolation(true);
+                  }
+                }}
                 style={{
                   fontSize: 10,
                   fontWeight: 600,
@@ -1431,9 +1519,9 @@ export function KnowledgeGraph({
                   cursor: "pointer",
                   transition: "all 0.2s",
                 }}
-                title={focusIsolation ? `Showing: "${focusLabel}" — click to show all` : `Click to isolate "${focusLabel}"`}
+                title={focusIsolation ? `Showing: "${effectiveFocusLabel}" — click to show all` : `Click to isolate "${effectiveFocusLabel}"`}
               >
-                {focusIsolation ? `🔍 ${focusLabel}` : "Show All"}
+                {focusIsolation ? `🔍 ${effectiveFocusLabel}` : "Show All"}
               </button>
             )}
             {activeTab === "patient" && graphSource === "neo4j" && (
@@ -1557,7 +1645,7 @@ export function KnowledgeGraph({
                 }}
                 onInit={(instance) => {
                   rfInstance.current = instance;
-                  if (focusLabel && focusIsolation && !initialFocusDoneRef.current) {
+                  if (effectiveFocusLabel && focusIsolation && !initialFocusDoneRef.current) {
                     initialFocusDoneRef.current = true;
                     // Auto-zoom to the focused cluster — runs once
                     const currentNodes = filteredNodes;
@@ -1588,7 +1676,7 @@ export function KnowledgeGraph({
                         instance.fitView({ padding: 0.15, duration: 600, maxZoom: 0.85 });
                       }, 300);
                     }
-                  } else if (!focusLabel) {
+                  } else if (!effectiveFocusLabel) {
                     // No focus — fit all nodes with comfortable zoom cap
                     setTimeout(() => {
                       instance.fitView({ padding: 0.15, duration: 600, maxZoom: 0.85 });
@@ -1618,7 +1706,7 @@ export function KnowledgeGraph({
                 />
               </ReactFlow>
               <Legend hiddenCategories={hiddenCategories} onToggleCategory={toggleCategory} />
-              <StatsBar data={patientData} />
+              <StatsBar data={patientData} onSelect={handleStatsSelect} />
             </>
           ) : activeTab === "reports" && hasReports && onOpenReport ? (
             <ReportsKnowledgeGraph

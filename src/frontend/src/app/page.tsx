@@ -312,7 +312,7 @@ export default function Home() {
     highlightText?: string;
     reportId?: string;
     accessionNumber?: string;
-    fileEndpointType?: "reports" | "episodes";
+    fileEndpointType?: "reports" | "episodes" | "izlem";
   } | null>(null);
   const [showTrendMonitor, setShowTrendMonitor] = useState(false);
 
@@ -407,26 +407,61 @@ export default function Home() {
     [],
   );
 
-  const handleOpenPacsEntry = useCallback(
-    (entry: ManifestEntry) => {
-      if (entry.accession_number) {
-        // Per-study PACS link via report viewer (has accession number)
+  const handleOpenIzlemPdf = useCallback(
+    (pdfPath: string) => {
+      // pdfPath is like "izlem_brief_13025094_20260412T163000.pdf"
+      const pid =
+        ((patientData as Record<string, unknown>)?.protocol_no as string) ||
+        ((patientData as Record<string, unknown>)?.patient_id as string) ||
+        (((patientData as Record<string, unknown>)?.patient as Record<string, unknown>)?.patient_id as string) ||
+        "";
+      if (pid && pdfPath) {
         setSelectedReport({
-          file: entry.file,
-          textFile: entry.text_file,
-          title: entry.report_name || entry.file,
-          reportId: entry.report_id,
-          accessionNumber: entry.accession_number,
+          file: pdfPath,
+          title: "İzlem Monitoring Brief",
+          fileEndpointType: "izlem",
         });
-      } else if (entry.pacs_url) {
-        // Radiology without accession — use the fresh signed PACS URL from manifest
+      }
+    },
+    [patientData],
+  );
+
+  const handleOpenPacsEntry = useCallback(
+    async (entry: ManifestEntry) => {
+      const pid =
+        ((patientData as Record<string, unknown>)?.protocol_no as string) ||
+        ((patientData as Record<string, unknown>)?.patient_id as string) ||
+        (((patientData as Record<string, unknown>)?.patient as Record<string, unknown>)?.patient_id as string) ||
+        "";
+      if (entry.accession_number && pid) {
+        // Generate fresh per-study PACS link and open directly
+        try {
+          const resp = await fetch(`${API_URL}/api/reports/${pid}/pacs/link`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              report_id: entry.report_id || null,
+              accession_number: entry.accession_number,
+            }),
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data.url) {
+              window.open(data.url, "_blank", "noopener");
+              return;
+            }
+          }
+        } catch {
+          // Fall through to fallback
+        }
+      }
+      if (entry.pacs_url) {
         window.open(entry.pacs_url, "_blank", "noopener,noreferrer");
       } else if (pacsAllStudies) {
-        // Fallback — open all-studies PACS viewer
         window.open(pacsAllStudies, "_blank", "noopener,noreferrer");
       }
     },
-    [pacsAllStudies],
+    [patientData, pacsAllStudies],
   );
 
   const handleOpenReportType = useCallback((reportType: string) => {
@@ -606,6 +641,7 @@ export default function Home() {
                   decision_tree: data.decision_tree,
                   language: data.language,
                   priority_country: data.priority_country,
+                  izlem_brief_pdf: data.izlem_brief_pdf,
                   timestamp: Date.now(),
                 };
 
@@ -989,6 +1025,7 @@ export default function Home() {
               patientEntities={patientEntities}
               onOpenReportType={handleOpenReportType}
               onOpenTrendForTest={handleOpenTrend}
+              onOpenIzlemPdf={handleOpenIzlemPdf}
             />
           ))}
 

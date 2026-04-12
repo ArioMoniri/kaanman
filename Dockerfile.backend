@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/backend/ ./src/backend/
 COPY scripts/ ./scripts/
+COPY ilac.json ./ilac.json
 
 ENV PYTHONPATH=/app
 EXPOSE 8000

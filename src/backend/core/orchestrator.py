@@ -23,6 +23,7 @@ from src.backend.agents.router import RouterAgent, RouteDecision
 from src.backend.agents.clinical import ClinicalAgent
 from src.backend.agents.research import ResearchAgent
 from src.backend.agents.drug import DrugAgent
+from src.backend.agents.prescription import PrescriptionAgent
 from src.backend.agents.composer import ComposerAgent
 from src.backend.agents.trust import TrustScorerAgent
 from src.backend.agents.decision_tree import DecisionTreeAgent
@@ -54,6 +55,17 @@ from src.backend.tools.graph import (
     ingest_reports as graph_ingest_reports,
     ingest_episodes as graph_ingest_episodes,
 )
+from src.backend.agents.izlem import IzlemAgent
+from src.backend.tools.izlem import (
+    auto_fetch_izlem,
+    izlem_exists,
+    get_izlem_data,
+    cross_reference_with_episodes,
+)
+from src.backend.tools.izlem_rag import (
+    index_izlem,
+    izlem_indexed as izlem_rag_indexed,
+)
 
 StatusCallback = Callable[[dict[str, Any]], Awaitable[None]] | None
 
@@ -73,6 +85,10 @@ AGENT_LABELS = {
     "composer_complete": "Composing complete analysis...",
     "decision_tree": "Generating decision tree...",
     "trust_scorer": "Evaluating confidence...",
+    "prescription": "Writing prescription...",
+    "izlem_fetch": "Fetching monitoring data...",
+    "izlem_index": "Indexing monitoring records...",
+    "izlem": "Analyzing monitoring data...",
 }
 
 
@@ -98,6 +114,7 @@ class OrchestratorResult:
         self.language: str = "en"
         self.priority_country: str = ""
         self.patient_context: dict | None = None
+        self.izlem_brief_pdf: str | None = None
 
     def model_dump(self) -> dict:
         return {
@@ -117,6 +134,7 @@ class OrchestratorResult:
             "language": self.language,
             "priority_country": self.priority_country,
             "patient_context": self.patient_context,
+            "izlem_brief_pdf": self.izlem_brief_pdf,
         }
 
 
@@ -126,12 +144,14 @@ class Orchestrator:
         self.clinical = ClinicalAgent()
         self.research = ResearchAgent()
         self.drug = DrugAgent()
+        self.prescription = PrescriptionAgent()
         self.reports_agent = ReportsAgent()
         self.episodes_agent = EpisodesAgent()
         self.composer = ComposerAgent()
         self.trust_scorer = TrustScorerAgent()
         self.decision_tree_agent = DecisionTreeAgent()
         self.phi_checker = PhiMasker()
+        self.izlem_agent = IzlemAgent()
 
     async def _emit(self, on_status: StatusCallback, event: dict):
         if on_status:
@@ -213,6 +233,7 @@ class Orchestrator:
         reports_dir_path = None
         episodes_manifest = None
         episodes_dir_path = None
+        izlem_data = None
 
         if detected_pid and not patient_context:
             await self._emit(on_status, {
@@ -265,12 +286,31 @@ class Orchestrator:
                     )
                     return None, None
 
+            async def _fetch_izlem_data():
+                """Fetch izlem (monitoring) data if available."""
+                if izlem_exists(detected_pid):
+                    return get_izlem_data(detected_pid)
+                try:
+                    await self._emit(on_status, {
+                        "agent": "izlem_fetch", "status": "running",
+                        "message": f"Fetching monitoring data for {detected_pid}...",
+                        "phase": "patient_fetch",
+                    })
+                    idata = await auto_fetch_izlem(detected_pid)
+                    return idata
+                except Exception as ie:
+                    logging.getLogger("cerebralink.orchestrator").warning(
+                        "Izlem fetch failed for %s: %s", detected_pid, ie
+                    )
+                    return None
+
             try:
                 # return_exceptions=True so one failure doesn't cancel the rest
-                patient_result, reports_result, episodes_result = await asyncio.gather(
+                patient_result, reports_result, episodes_result, izlem_result = await asyncio.gather(
                     _fetch_patient_data(),
                     _fetch_reports_data(),
                     _fetch_episodes_data(),
+                    _fetch_izlem_data(),
                     return_exceptions=True,
                 )
 
@@ -337,6 +377,20 @@ class Orchestrator:
                             "message": f"Episodes loaded: {yatis_n} yatış, {poli_n} poliklinik",
                         })
 
+                # ── Handle izlem result (may be dict, None, or exception) ──
+                if isinstance(izlem_result, Exception):
+                    logging.getLogger("cerebralink.orchestrator").warning(
+                        "Izlem fetch failed for %s: %s", detected_pid, izlem_result
+                    )
+                elif isinstance(izlem_result, dict) and izlem_result:
+                    izlem_data = izlem_result
+                    ep_count = len(izlem_data.get("episodes", []))
+                    await self._emit(on_status, {
+                        "agent": "izlem_fetch", "status": "done",
+                        "time_ms": t_fetch,
+                        "message": f"Monitoring data loaded: {ep_count} episodes",
+                    })
+
             except Exception as e:
                 t_fetch = int((time.monotonic() - t0) * 1000)
                 tb = traceback.format_exc()
@@ -357,6 +411,9 @@ class Orchestrator:
         if detected_pid and episodes_manifest is None and episodes_exist(detected_pid):
             episodes_manifest = get_episodes_manifest(detected_pid)
             episodes_dir_path = str(get_episodes_dir(detected_pid))
+
+        if detected_pid and izlem_data is None and izlem_exists(detected_pid):
+            izlem_data = get_izlem_data(detected_pid)
 
         # ── 2b. Index reports + generate brief (if not cached / expired) ──
         if detected_pid and reports_manifest and reports_dir_path:
@@ -436,6 +493,31 @@ class Orchestrator:
                 except Exception:
                     pass
 
+        # ── 2d. Index izlem data (if not cached) ──
+        if detected_pid and izlem_data:
+            rag_indexed = await izlem_rag_indexed(detected_pid)
+            if not rag_indexed:
+                await self._emit(on_status, {
+                    "agent": "izlem_index", "status": "running",
+                    "message": "Indexing monitoring records...",
+                    "phase": "patient_fetch",
+                })
+                t0_iidx = time.monotonic()
+                try:
+                    await index_izlem(detected_pid, izlem_data)
+                    # Cross-reference with episodes if both available
+                    if episodes_manifest:
+                        cross_reference_with_episodes(izlem_data, episodes_manifest)
+                    t_iidx = int((time.monotonic() - t0_iidx) * 1000)
+                    result.agents_used.append("izlem_index")
+                    result.agent_timings.append(AgentTiming(agent="izlem_index", time_ms=t_iidx))
+                    await self._emit(on_status, {
+                        "agent": "izlem_index", "status": "done",
+                        "time_ms": t_iidx, "message": "Monitoring records indexed",
+                    })
+                except Exception:
+                    pass
+
         # ── 3. Fan-out: parallel agents ──
         agent_map: dict[str, tuple] = {}
         if route.needs_clinical:
@@ -461,6 +543,14 @@ class Orchestrator:
                 self.episodes_agent,
                 self.episodes_agent.analyze_for_council,
                 (message, detected_pid, fast_mode, route.language),
+            )
+
+        # Izlem agent runs in parallel when we have monitoring data
+        if route.needs_izlem and izlem_data:
+            agent_map["izlem"] = (
+                self.izlem_agent,
+                self.izlem_agent.analyze_for_council,
+                (message, detected_pid, izlem_data),
             )
 
         if not agent_map:
@@ -503,6 +593,42 @@ class Orchestrator:
                 ))
             except Exception:
                 pass
+
+        # ── 3b. Prescription agent (runs after drug results are available) ──
+        if route.needs_drug and "drug" in agent_outputs:
+            drug_out = agent_outputs["drug"]
+            drug_result_text = ""
+            if isinstance(drug_out, dict):
+                drug_result_text = drug_out.get("analysis", "")
+            if drug_result_text:
+                await self._emit(on_status, {
+                    "agent": "prescription", "status": "running",
+                    "message": AGENT_LABELS["prescription"], "phase": "council",
+                })
+                t0_rx = time.monotonic()
+                try:
+                    rx_result = await self.prescription.write_prescription(
+                        message, drug_result_text, patient_context,
+                        route.priority_country,
+                    )
+                    elapsed_rx = int((time.monotonic() - t0_rx) * 1000)
+                    agent_outputs["prescription"] = rx_result
+                    result.agents_used.append("prescription")
+                    result.agent_timings.append(AgentTiming(
+                        agent="prescription", time_ms=elapsed_rx,
+                        input_tokens=self.prescription.last_usage["input_tokens"],
+                        output_tokens=self.prescription.last_usage["output_tokens"],
+                    ))
+                    await self._emit(on_status, {
+                        "agent": "prescription", "status": "done",
+                        "time_ms": elapsed_rx,
+                        "tokens": self.prescription.last_usage,
+                        "message": "prescription complete",
+                    })
+                except Exception as e:
+                    logging.getLogger("cerebralink.orchestrator").warning(
+                        "Prescription agent failed: %s", e,
+                    )
 
         # ── 4. Extract citations ──
         if "research" in agent_outputs and isinstance(agent_outputs["research"], dict):

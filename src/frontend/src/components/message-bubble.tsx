@@ -79,6 +79,7 @@ export interface Message {
   decision_tree?: DecisionTreeData;
   language?: string;
   priority_country?: string;
+  izlem_brief_pdf?: string;
   timestamp: number;
 }
 
@@ -119,6 +120,17 @@ const COUNTRY_FLAGS: Record<string, string> = {
   WHO: "\u{1F3E5}",
 };
 
+/** Map badge variant → explicit inline style colors for the impact pill.
+ *  These are used with direct style= so they're immune to Tailwind purging & CSS caching. */
+const IMPACT_STYLES: Record<string, { bg: string; text: string; border: string; label: string }> = {
+  green:          { bg: "#16a34a", text: "#ffffff", border: "#22c55e", label: "High impact" },
+  blue:           { bg: "#2563eb", text: "#ffffff", border: "#3b82f6", label: "Moderate impact" },
+  "teal-subtle":  { bg: "rgba(20,184,166,0.25)", text: "#5eead4", border: "rgba(20,184,166,0.5)", label: "WHO / International" },
+  amber:          { bg: "#d97706", text: "#000000", border: "#f59e0b", label: "Priority country" },
+  "purple-subtle":{ bg: "rgba(147,51,234,0.25)", text: "#c4b5fd", border: "rgba(147,51,234,0.5)", label: "Contextual" },
+  "gray-subtle":  { bg: "rgba(107,114,128,0.2)", text: "#d1d5db", border: "rgba(107,114,128,0.4)", label: "Low impact" },
+};
+
 function getEffectBadgeVariant(
   citation: Citation,
   index: number,
@@ -147,6 +159,19 @@ function getEffectBadgeVariant(
   if (hasQuote || hasUrl) return "blue";
   if (index < Math.ceil(total * 0.4)) return "purple-subtle";
   return "gray-subtle";
+}
+
+/** Get the impact label + style for a citation — always returns a value */
+function getImpactInfo(citation: Citation, variant: BadgeVariant): { label: string; style: { bg: string; text: string; border: string } } {
+  // Determine label from structured data or heuristics
+  const label = citation.importance
+    ? (citation.importance === "high" ? "High impact" : citation.importance === "medium" ? "Moderate impact" : "Low impact")
+    : citation.effect_size && citation.effect_size !== "none"
+    ? (citation.effect_size === "large" ? "High impact" : citation.effect_size === "moderate" ? "Moderate impact" : "Contextual")
+    : IMPACT_STYLES[variant]?.label || "Low impact";
+
+  const style = IMPACT_STYLES[variant] || IMPACT_STYLES["gray-subtle"];
+  return { label, style };
 }
 
 /** Extract key content blocks from the complete answer for highlighting.
@@ -244,6 +269,11 @@ function InlineRefText({ text, citations, onOpenReferenceUrl, onOpenReferences }
 
         const refIndex = parseInt(match[1], 10);
         const citation = citations?.find((c) => c.index === refIndex);
+        // Color-coded inline badge matching reference impact
+        const citeVariant = citation
+          ? getEffectBadgeVariant(citation, (citation.index || refIndex) - 1, citations?.length || 1)
+          : "blue";
+        const citeStyle = IMPACT_STYLES[citeVariant] || IMPACT_STYLES["blue"];
 
         return (
           <button
@@ -255,8 +285,13 @@ function InlineRefText({ text, citations, onOpenReferenceUrl, onOpenReferences }
                 onOpenReferences();
               }
             }}
-            className="inline-flex items-center justify-center min-w-[20px] h-[18px] px-1 mx-0.5 rounded text-[10px] font-bold bg-accent/15 text-accent hover:bg-accent/30 hover:text-white transition-all cursor-pointer border border-accent/20 align-middle leading-none"
-            title={citation ? `${citation.source} — ${citation.title}` : `Reference [${refIndex}]`}
+            style={{
+              background: citeStyle.bg,
+              color: citeStyle.text,
+              border: `1px solid ${citeStyle.border}`,
+            }}
+            className="inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 mx-0.5 rounded-full text-[10px] font-bold hover:brightness-125 transition-all cursor-pointer align-middle leading-none"
+            title={citation ? `[${refIndex}] ${citation.source} — ${citation.title}${citation.url ? "\nClick to open in browser" : ""}` : `Reference [${refIndex}]`}
           >
             {refIndex}
           </button>
@@ -569,15 +604,25 @@ function markdownComponents(
       <li className="text-base text-gray-200 leading-relaxed" {...props}>{children}</li>
     ),
     a: ({ href, children, ...props }: React.ComponentPropsWithoutRef<"a">) => {
-      // Handle inline citation links (#cite-N)
+      // Handle inline citation links (#cite-N) — opens embedded browser
       const citeMatch = href?.match(/^#cite-(\d+)$/);
       if (citeMatch) {
         const refIndex = parseInt(citeMatch[1], 10);
         const citation = citations?.find((c) => c.index === refIndex);
+        // Color the inline badge to match the reference's impact level
+        const citeVariant = citation
+          ? getEffectBadgeVariant(citation, (citation.index || refIndex) - 1, citations?.length || 1)
+          : "blue";
+        const citeStyle = IMPACT_STYLES[citeVariant] || IMPACT_STYLES["blue"];
         return (
           <button
-            className="inline-flex items-center justify-center min-w-[20px] h-[18px] px-1 mx-0.5 rounded text-[10px] font-bold bg-accent/15 text-accent hover:bg-accent/30 hover:text-white transition-all cursor-pointer border border-accent/20 align-middle leading-none"
-            title={citation ? `${citation.source} — ${citation.title}` : `Reference [${refIndex}]`}
+            style={{
+              background: citeStyle.bg,
+              color: citeStyle.text,
+              border: `1px solid ${citeStyle.border}`,
+            }}
+            className="inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 mx-0.5 rounded-full text-[10px] font-bold hover:brightness-125 transition-all cursor-pointer align-middle leading-none"
+            title={citation ? `[${refIndex}] ${citation.source} — ${citation.title}${citation.url ? "\nClick to open in browser" : ""}` : `Reference [${refIndex}]`}
             onClick={(e) => {
               e.preventDefault();
               if (citation?.url && onOpenReferenceUrl) {
@@ -733,6 +778,7 @@ interface MessageBubbleProps {
   patientEntities?: DeepLinkEntity[];
   onOpenReportType?: (reportType: string) => void;
   onOpenTrendForTest?: (testName: string) => void;
+  onOpenIzlemPdf?: (pdfPath: string) => void;
 }
 
 export function MessageBubble({
@@ -746,9 +792,11 @@ export function MessageBubble({
   patientEntities,
   onOpenReportType,
   onOpenTrendForTest,
+  onOpenIzlemPdf,
 }: MessageBubbleProps) {
   const [mode, setMode] = useState<"fast" | "complete" | "highlight">("fast");
   const [showCitations, setShowCitations] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   if (message.role === "user") {
     return (
@@ -771,6 +819,42 @@ export function MessageBubble({
     () => (hasDualMode ? extractHighlights(message.complete_answer!) : []),
     [hasDualMode, message.complete_answer],
   );
+
+  const handleCopyContent = async () => {
+    const textToCopy = mode === "highlight" && hasDualMode
+      ? highlights.map((h) => h.replace(/[#*_~`>\[\]()!]/g, "").trim()).join("\n\n")
+      : (displayContent || "")
+          .replace(/#{1,6}\s?/g, "")
+          .replace(/\*{1,3}(.*?)\*{1,3}/g, "$1")
+          .replace(/_{1,3}(.*?)_{1,3}/g, "$1")
+          .replace(/~~(.*?)~~/g, "$1")
+          .replace(/`{1,3}[^`]*`{1,3}/g, (m) => m.replace(/`/g, ""))
+          .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+          .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+          .replace(/^\s*[-*+]\s/gm, "")
+          .replace(/^\s*\d+\.\s/gm, "")
+          .replace(/^\s*>\s?/gm, "")
+          .replace(/---+/g, "")
+          .replace(/\n{3,}/g, "\n\n")
+          .trim();
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback for older browsers
+      const textarea = document.createElement("textarea");
+      textarea.value = textToCopy;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   // Extract clinical alert lines from the current display content
   const alerts = extractAlerts(displayContent);
@@ -839,29 +923,63 @@ export function MessageBubble({
             <div />
           )}
 
-          <div className="flex items-center gap-1.5">
-            {hasDecisionTree && onOpenDecisionTree && (
-              <button
-                onClick={() => onOpenDecisionTree(message.decision_tree!)}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-accent/10 text-accent/80 hover:bg-accent/20 hover:text-accent border border-accent/20 transition-all"
-              >
-                Decision Tree
-              </button>
-            )}
-            {hasPatientData && onOpenKnowledgeGraph && (
-              <button
-                onClick={onOpenKnowledgeGraph}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-500/10 text-emerald-400/80 hover:bg-emerald-500/20 hover:text-emerald-400 border border-emerald-500/20 transition-all"
-              >
-                Knowledge Graph
-              </button>
-            )}
+          <div className="flex items-center gap-1 flex-wrap">
+            {/* Copy */}
+            <button
+              onClick={handleCopyContent}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all"
+              style={{
+                background: copied ? "rgba(34,197,94,0.15)" : "rgba(107,114,128,0.1)",
+                color: copied ? "#4ade80" : "#9ca3af",
+                border: `1px solid ${copied ? "rgba(34,197,94,0.3)" : "rgba(107,114,128,0.2)"}`,
+              }}
+              title="Copy to clipboard"
+            >
+              {copied ? (
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+              ) : (
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              )}
+              {copied ? "Copied!" : "Copy"}
+            </button>
+            {/* References */}
             {hasCitations && onOpenReferences && (
               <button
                 onClick={onOpenReferences}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-500/10 text-blue-400/80 hover:bg-blue-500/20 hover:text-blue-400 border border-blue-500/20 transition-all"
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/10 text-blue-400/80 hover:bg-blue-500/20 hover:text-blue-400 border border-blue-500/20 transition-all"
               >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
                 References
+              </button>
+            )}
+            {/* Knowledge Graph */}
+            {hasPatientData && onOpenKnowledgeGraph && (
+              <button
+                onClick={onOpenKnowledgeGraph}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400/80 hover:bg-emerald-500/20 hover:text-emerald-400 border border-emerald-500/20 transition-all"
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><line x1="14.5" y1="9.5" x2="17.5" y2="6.5"/><line x1="9.5" y1="14.5" x2="6.5" y2="17.5"/></svg>
+                Graph
+              </button>
+            )}
+            {/* Decision Tree */}
+            {hasDecisionTree && onOpenDecisionTree && (
+              <button
+                onClick={() => onOpenDecisionTree(message.decision_tree!)}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-accent/10 text-accent/80 hover:bg-accent/20 hover:text-accent border border-accent/20 transition-all"
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="5" r="3"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="13" x2="6" y2="17"/><line x1="12" y1="13" x2="18" y2="17"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/></svg>
+                Decision Tree
+              </button>
+            )}
+            {/* Izlem Brief */}
+            {message.izlem_brief_pdf && onOpenIzlemPdf && (
+              <button
+                onClick={() => onOpenIzlemPdf(message.izlem_brief_pdf!)}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/10 text-rose-400/80 hover:bg-rose-500/20 hover:text-rose-400 border border-rose-500/20 transition-all"
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                İzlem Brief
               </button>
             )}
           </div>
@@ -971,17 +1089,7 @@ export function MessageBubble({
                     priorityCountry
                   );
 
-                  // Compute a human-readable impact label — always shown
-                  const impactLabel = c.importance
-                    ? (c.importance === "high" ? "High impact" : c.importance === "medium" ? "Moderate impact" : "Low impact")
-                    : c.effect_size && c.effect_size !== "none"
-                    ? (c.effect_size === "large" ? "High impact" : c.effect_size === "moderate" ? "Moderate impact" : "Contextual")
-                    : variant === "green" ? "High impact"
-                    : variant === "blue" ? "Moderate impact"
-                    : variant === "teal-subtle" ? "WHO / International"
-                    : variant === "amber" ? "Priority country"
-                    : variant === "purple-subtle" ? "Contextual"
-                    : "Low impact";
+                  const impact = getImpactInfo(c, variant);
 
                   const openInBrowser = (e: React.MouseEvent) => {
                     e.stopPropagation();
@@ -995,22 +1103,27 @@ export function MessageBubble({
                   return (
                     <div
                       key={c.index}
-                      className="flex items-start gap-2 px-2.5 py-2 rounded-lg bg-surface/50 hover:bg-surface-light transition-colors group"
+                      className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-surface/50 hover:bg-surface-light transition-colors group"
                     >
+                      {/* Number badge */}
                       <button
                         onClick={openInBrowser}
                         className="mt-0.5 shrink-0 cursor-pointer hover:scale-110 hover:brightness-125 transition-all"
                         title={c.url ? `Open ${c.source} in browser` : c.title}
                       >
-                        <Badge variant={variant} size="sm">
-                          [{c.index}]
-                        </Badge>
+                        <span
+                          style={{ background: impact.style.bg, color: impact.style.text, border: `1px solid ${impact.style.border}` }}
+                          className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-full text-[11px] font-bold"
+                        >
+                          {c.index}
+                        </span>
                       </button>
-                      <div className="min-w-0 flex-1 text-xs">
+                      <div className="min-w-0 flex-1">
+                        {/* Row 1: Source name + Impact badge */}
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <button
                             onClick={openInBrowser}
-                            className={`font-semibold text-left cursor-pointer transition-colors ${c.url ? "text-accent/80 hover:text-accent underline underline-offset-2 decoration-accent/40 hover:decoration-accent/80" : "text-gray-300 hover:text-gray-200"}`}
+                            className={`text-xs font-semibold text-left cursor-pointer transition-colors ${c.url ? "text-accent/80 hover:text-accent underline underline-offset-2 decoration-accent/40 hover:decoration-accent/80" : "text-gray-300 hover:text-gray-200"}`}
                             title={c.url ? `Open: ${c.url}` : c.title}
                           >
                             {c.source}
@@ -1023,15 +1136,25 @@ export function MessageBubble({
                               {c.year}
                             </span>
                           )}
-                          {/* Always-visible impact badge — computed from LLM data or heuristics */}
+                        </div>
+                        {/* Row 2: Impact badge — always visible, explicit styled pill */}
+                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                           <button
                             onClick={openInBrowser}
-                            className="cursor-pointer hover:scale-110 hover:brightness-125 transition-all hover:ring-1 hover:ring-accent/30 rounded-full"
-                            title={c.url ? `${impactLabel} — click to open article` : impactLabel}
+                            className="cursor-pointer hover:brightness-125 transition-all"
+                            title={c.url ? `${impact.label} — click to open article` : impact.label}
                           >
-                            <Badge variant={variant} size="sm">
-                              {impactLabel}
-                            </Badge>
+                            <span
+                              style={{
+                                background: impact.style.bg,
+                                color: impact.style.text,
+                                border: `1px solid ${impact.style.border}`,
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap"
+                            >
+                              <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>
+                              {impact.label}
+                            </span>
                           </button>
                           {c.evidence_level && (
                             <button
@@ -1047,17 +1170,19 @@ export function MessageBubble({
                               onClick={openInBrowser}
                               className="text-[10px] text-accent/50 hover:text-accent/80 ml-auto cursor-pointer transition-colors"
                             >
-                              Open &nearr;
+                              Open ↗
                             </button>
                           )}
                         </div>
+                        {/* Title */}
                         <button
                           onClick={openInBrowser}
-                          className="text-gray-400 mt-0.5 truncate block text-left w-full cursor-pointer hover:text-accent/70 transition-colors"
+                          className="text-xs text-gray-400 mt-1 truncate block text-left w-full cursor-pointer hover:text-accent/70 transition-colors"
                           title={c.url ? `Open: ${c.title}` : c.title}
                         >
                           {c.title}
                         </button>
+                        {/* Quote */}
                         {c.quote && (
                           <div className="text-gray-500 mt-0.5 italic text-[11px] line-clamp-2">
                             &quot;{c.quote}&quot;
@@ -1105,8 +1230,7 @@ export function MessageBubble({
         )}
 
         {/* Agents used + timing — footer */}
-        {(message.agents_used?.length || message.total_time_ms) && (
-          <div className="px-5 py-2 border-t border-border/20 flex items-center gap-3 flex-wrap">
+        <div className="px-5 py-1.5 border-t border-border/20 flex items-center gap-3 flex-wrap">
             {message.agents_used && message.agents_used.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {message.agents_used.map((a, i) => (
@@ -1134,8 +1258,24 @@ export function MessageBubble({
                 )}
               </div>
             )}
-          </div>
-        )}
+            <button
+              onClick={handleCopyContent}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ml-2"
+              style={{
+                background: copied ? "rgba(34,197,94,0.15)" : "rgba(107,114,128,0.1)",
+                color: copied ? "#4ade80" : "#9ca3af",
+                border: `1px solid ${copied ? "rgba(34,197,94,0.3)" : "rgba(107,114,128,0.2)"}`,
+              }}
+              title="Copy to clipboard"
+            >
+              {copied ? (
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+              ) : (
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              )}
+              {copied ? "Copied!" : "Copy"}
+            </button>
+        </div>
       </div>
     </div>
   );

@@ -82,6 +82,7 @@ def _ensure_schema():
                 "CREATE INDEX IF NOT EXISTS FOR (lt:LabTest) ON (lt.name)",
                 "CREATE INDEX IF NOT EXISTS FOR (f:Facility) ON (f.name)",
                 "CREATE INDEX IF NOT EXISTS FOR (doc:Doctor) ON (doc.name)",
+                "CREATE INDEX IF NOT EXISTS FOR (iz:IzlemRecord) ON (iz.episode_id)",
             ]
             for c in constraints:
                 session.run(c)
@@ -588,6 +589,145 @@ def ingest_episodes(
         return {"ingested": False, "reason": str(e)}
 
 
+def ingest_izlem(patient_id: str, izlem_data: dict) -> dict:
+    """Ingest izlem (monitoring) data into Neo4j.
+
+    Creates nodes: IzlemRecord, VitalSign, MedicationAdmin, DoctorNote, NurseNote
+    Links to existing Episode nodes by episode_id.
+    Creates summary nodes per episode per data type with record counts and key values.
+    """
+    driver = _get_driver()
+    if not driver:
+        return {"ingested": False, "reason": "neo4j_unavailable"}
+
+    _ensure_schema()
+
+    node_count = 0
+    edge_count = 0
+
+    try:
+        with driver.session() as session:
+            # Ensure patient node exists
+            session.run(
+                "MERGE (p:Patient {patient_id: $pid})",
+                pid=str(patient_id),
+            )
+
+            for episode in izlem_data.get("episodes", []):
+                ep_info = episode.get("episode_info", {})
+                ep_id = str(ep_info.get("episode_id", ""))
+                if not ep_id:
+                    continue
+
+                # Create IzlemRecord summary node for this episode
+                session.run(
+                    """
+                    MERGE (iz:IzlemRecord {episode_id: $eid, patient_id: $pid})
+                    SET iz.updated_at = datetime()
+                    WITH iz
+                    MATCH (p:Patient {patient_id: $pid})
+                    MERGE (p)-[:HAS_IZLEM]->(iz)
+                    """,
+                    eid=ep_id, pid=str(patient_id),
+                )
+                node_count += 1
+                edge_count += 1
+
+                # Link IzlemRecord to Episode
+                session.run(
+                    """
+                    MERGE (e:Episode {episode_id: $eid})
+                    WITH e
+                    MATCH (iz:IzlemRecord {episode_id: $eid, patient_id: $pid})
+                    MERGE (iz)-[:FOR_EPISODE]->(e)
+                    """,
+                    eid=ep_id, pid=str(patient_id),
+                )
+                edge_count += 1
+
+                # VitalSign summary node
+                vitals = episode.get("vital_bulgular", [])
+                if vitals:
+                    session.run(
+                        """
+                        MERGE (vs:VitalSign {episode_id: $eid, patient_id: $pid})
+                        SET vs.record_count = $count,
+                            vs.updated_at = datetime()
+                        WITH vs
+                        MATCH (iz:IzlemRecord {episode_id: $eid, patient_id: $pid})
+                        MERGE (iz)-[:HAS_VITALS]->(vs)
+                        """,
+                        eid=ep_id, pid=str(patient_id),
+                        count=len(vitals),
+                    )
+                    node_count += 1
+                    edge_count += 1
+
+                # MedicationAdmin summary node
+                meds = episode.get("ilac_izlem", [])
+                if meds:
+                    session.run(
+                        """
+                        MERGE (ma:MedicationAdmin {episode_id: $eid, patient_id: $pid})
+                        SET ma.record_count = $count,
+                            ma.updated_at = datetime()
+                        WITH ma
+                        MATCH (iz:IzlemRecord {episode_id: $eid, patient_id: $pid})
+                        MERGE (iz)-[:HAS_MED_ADMIN]->(ma)
+                        """,
+                        eid=ep_id, pid=str(patient_id),
+                        count=len(meds),
+                    )
+                    node_count += 1
+                    edge_count += 1
+
+                # DoctorNote summary node
+                doc_notes = episode.get("hekim_izlem_notlari", [])
+                if doc_notes:
+                    session.run(
+                        """
+                        MERGE (dn:DoctorNote {episode_id: $eid, patient_id: $pid})
+                        SET dn.record_count = $count,
+                            dn.updated_at = datetime()
+                        WITH dn
+                        MATCH (iz:IzlemRecord {episode_id: $eid, patient_id: $pid})
+                        MERGE (iz)-[:HAS_DOCTOR_NOTE]->(dn)
+                        """,
+                        eid=ep_id, pid=str(patient_id),
+                        count=len(doc_notes),
+                    )
+                    node_count += 1
+                    edge_count += 1
+
+                # NurseNote summary node
+                nurse_notes = episode.get("hemsire_izlem_notlari", [])
+                if nurse_notes:
+                    session.run(
+                        """
+                        MERGE (nn:NurseNote {episode_id: $eid, patient_id: $pid})
+                        SET nn.record_count = $count,
+                            nn.updated_at = datetime()
+                        WITH nn
+                        MATCH (iz:IzlemRecord {episode_id: $eid, patient_id: $pid})
+                        MERGE (iz)-[:HAS_NURSE_NOTE]->(nn)
+                        """,
+                        eid=ep_id, pid=str(patient_id),
+                        count=len(nurse_notes),
+                    )
+                    node_count += 1
+                    edge_count += 1
+
+        log.info(
+            "Izlem data ingested for %s: %d nodes, %d edges",
+            patient_id, node_count, edge_count,
+        )
+        return {"ingested": True, "nodes": node_count, "edges": edge_count}
+
+    except Exception as e:
+        log.error("Izlem ingestion failed: %s", e)
+        return {"ingested": False, "reason": str(e)}
+
+
 def query_episodes_graph(patient_id: str) -> dict:
     """Query the episodes knowledge graph (Yatış + Poliklinik).
 
@@ -761,6 +901,11 @@ _LABEL_CATEGORY = {
     "LabValue": "labValue",
     "Hospitalization": "hospitalization",
     "Poliklinik": "poliklinik",
+    "IzlemRecord": "izlemRecord",
+    "VitalSign": "vitalSign",
+    "MedicationAdmin": "medicationAdmin",
+    "DoctorNote": "doctorNote",
+    "NurseNote": "nurseNote",
 }
 
 
@@ -883,7 +1028,9 @@ def _apply_layout(nodes: list[dict]):
         "patient", "department", "episode", "diagnosis",
         "medication", "allergy", "doctor", "facility",
         "report", "reportType", "pacs", "labTest", "labValue",
-        "hospitalization", "poliklinik", "other",
+        "hospitalization", "poliklinik",
+        "izlemRecord", "vitalSign", "medicationAdmin", "doctorNote", "nurseNote",
+        "other",
     ]
 
     ring_radius = {
@@ -894,6 +1041,8 @@ def _apply_layout(nodes: list[dict]):
         "report": 350, "reportType": 550,
         "pacs": 650, "labTest": 450, "labValue": 600,
         "hospitalization": 400, "poliklinik": 500,
+        "izlemRecord": 450, "vitalSign": 550,
+        "medicationAdmin": 600, "doctorNote": 550, "nurseNote": 600,
         "other": 500,
     }
 

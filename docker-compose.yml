@@ -60,6 +60,10 @@ services:
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_AUTH=neo4j/cerebralink2024
       - PATIENT_DATA_DIR=/app/patient_data
+      - HEALTHCARE_MCP_URL=http://healthcare-mcp:3002
+      - FOOD_DATA_MCP_URL=http://food-data-mcp:3003
+      - MEDICAL_KNOWLEDGE_MCP_URL=http://medical-knowledge-mcp:3004
+      - OMOPHUB_MCP_URL=http://omophub-mcp:3005
     volumes:
       - ./cookies:/app/cookies:ro
       - ./scripts:/app/scripts:ro
@@ -74,6 +78,71 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+
+  # Healthcare MCP - Clinical decision support, drug interactions, lab interpretation
+  healthcare-mcp:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install healthcare-mcp-server && npx healthcare-mcp-server"
+    ports:
+      - "3102:3002"
+    environment:
+      - PORT=3002
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3002/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Food Data Central MCP - USDA nutritional data
+  food-data-mcp:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install food-data-central-mcp-server && npx food-data-central-mcp-server"
+    ports:
+      - "3103:3003"
+    environment:
+      - PORT=3003
+      - FDC_API_KEY=${FDC_API_KEY}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3003/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Medical MCP (thrownlemon) - Medical knowledge, symptoms, conditions
+  medical-knowledge-mcp:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install @thrownlemon/medical-mcp && npx @thrownlemon/medical-mcp"
+    ports:
+      - "3104:3004"
+    environment:
+      - PORT=3004
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3004/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # OMOP Hub MCP - OMOP CDM terminology, concept mapping
+  omophub-mcp:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install omophub-mcp && npx omophub-mcp"
+    ports:
+      - "3105:3005"
+    environment:
+      - PORT=3005
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3005/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   frontend:
     build:

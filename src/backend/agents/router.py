@@ -25,6 +25,7 @@ class RouteDecision:
     needs_clinical: bool = True
     needs_research: bool = False
     needs_drug: bool = False
+    needs_izlem: bool = False
     needs_patient_context: bool = False
     guideline_countries: list[str] = field(default_factory=lambda: ["USA", "Europe"])
     reasoning: str = ""
@@ -89,6 +90,19 @@ Detect the language and map to priority country:
 - "de" → priority_country: "Europe"
 - "fr" → priority_country: "Europe"
 
+## IZLEM (MONITORING) DATA
+Set needs_izlem=true when the query involves:
+- Patient monitoring notes (izlem, observation, follow-up notes)
+- Vital signs tracking (vitals, nabız, tansiyon, SpO2, ateş)
+- Medication administration records (ilaç izlem, drug tracking)
+- Nurse/doctor observation notes (hemşire/hekim izlem)
+- Blood gas monitoring (kan gazı)
+- Infection control monitoring
+- Any query about "what happened during hospitalization" or "yatış süreci"
+- Requests for patient monitoring brief/PDF
+- Turkish keywords: izlem, takip, vital, hemşire notu, hekim notu, ilaç takibi
+Always set needs_izlem=true when needs_patient_context=true and the patient is hospitalized (yatış).
+
 ## STEP 4: DECISION TREE
 
 Set needs_decision_tree=true when the query involves:
@@ -105,6 +119,7 @@ Set needs_decision_tree=true when the query involves:
   "needs_clinical": true,
   "needs_research": false,
   "needs_drug": false,
+  "needs_izlem": false,
   "needs_patient_context": false,
   "needs_decision_tree": false,
   "guideline_countries": ["Turkey", "Europe", "USA"],

@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 interface Citation {
   index: number;
@@ -55,64 +57,150 @@ function isBlockedDomain(url: string): boolean {
   }
 }
 
-/** Embedded browser with iframe load-error detection */
+/** Reader-mode article data from backend proxy */
+interface ReaderArticle {
+  title: string;
+  author: string | null;
+  date: string | null;
+  description: string | null;
+  content: string;
+  word_count: number;
+  domain: string;
+  url: string;
+}
+
+/** Embedded browser with iframe → reader-mode fallback */
 function EmbeddedBrowser({ url, title, onCopy, onShare, copied }: {
   url: string; title: string; onCopy: () => void; onShare: () => void; copied: boolean;
 }) {
-  const [loadFailed, setLoadFailed] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const iframeRef = React.useRef<HTMLIFrameElement>(null);
+  const [mode, setMode] = useState<"iframe" | "reader" | "loading-reader" | "error">("iframe");
+  const [iframeLoading, setIframeLoading] = useState(true);
+  const [article, setArticle] = useState<ReaderArticle | null>(null);
+  const [readerError, setReaderError] = useState<string | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const blockedRef = useRef(false);
 
-  // Reset state when URL changes — check for known-blocked domains immediately
-  useEffect(() => {
-    if (isBlockedDomain(url)) {
-      setLoadFailed(true);
-      setLoading(false);
-    } else {
-      setLoadFailed(false);
-      setLoading(true);
+  // Fetch article via reader proxy
+  const fetchReader = useCallback(async (targetUrl: string) => {
+    setMode("loading-reader");
+    setReaderError(null);
+    try {
+      const resp = await fetch(`${API_URL}/api/reader?url=${encodeURIComponent(targetUrl)}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data: ReaderArticle = await resp.json();
+      if (data.word_count < 10) throw new Error("No readable content extracted");
+      setArticle(data);
+      setMode("reader");
+    } catch (err) {
+      setReaderError(err instanceof Error ? err.message : "Failed to load article");
+      setMode("error");
     }
-  }, [url]);
+  }, []);
 
-  // Timeout: if iframe hasn't signalled load in 5s, assume blocked
+  // Reset on URL change — blocked domains go straight to reader
   useEffect(() => {
-    if (isBlockedDomain(url)) return;
-    setLoading(true);
+    blockedRef.current = isBlockedDomain(url);
+    setArticle(null);
+    setReaderError(null);
+    if (blockedRef.current) {
+      fetchReader(url);
+    } else {
+      setMode("iframe");
+      setIframeLoading(true);
+    }
+  }, [url, fetchReader]);
+
+  // Timeout: if iframe hasn't loaded in 5s, fall back to reader
+  useEffect(() => {
+    if (blockedRef.current || mode !== "iframe") return;
     const timer = setTimeout(() => {
-      // If still loading after 5s, the site likely blocked framing
-      setLoading(false);
-      setLoadFailed(true);
+      if (iframeLoading) {
+        fetchReader(url);
+      }
     }, 5000);
     return () => clearTimeout(timer);
-  }, [url]);
+  }, [url, mode, iframeLoading, fetchReader]);
 
   const handleIframeLoad = useCallback(() => {
-    // iframe fired load — could still be blocked (some browsers fire load anyway)
-    // but at least something happened, give it the benefit of the doubt
-    setLoading(false);
+    setIframeLoading(false);
   }, []);
 
   const handleIframeError = useCallback(() => {
-    setLoadFailed(true);
-    setLoading(false);
-  }, []);
+    fetchReader(url);
+  }, [url, fetchReader]);
+
+  // Toolbar (shared across all modes)
+  const toolbar = (
+    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-surface border-b border-border/20">
+      {mode === "reader" && (
+        <span className="text-[9px] text-emerald-500/80 font-semibold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 shrink-0">
+          Reader
+        </span>
+      )}
+      <span className="text-[10px] text-gray-400 truncate flex-1">{article?.domain || url}</span>
+      <button onClick={onCopy} className="text-[10px] text-gray-500 hover:text-gray-300 shrink-0 px-1.5 py-0.5 rounded border border-border/30 hover:border-border/60 transition-all" title="Copy link">
+        {copied ? "Copied!" : "Copy"}
+      </button>
+      <button onClick={onShare} className="text-[10px] text-gray-500 hover:text-gray-300 shrink-0 px-1.5 py-0.5 rounded border border-border/30 hover:border-border/60 transition-all" title="Share">
+        Share
+      </button>
+      <a href={url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-accent/70 hover:text-accent shrink-0">
+        Open &nearr;
+      </a>
+    </div>
+  );
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-surface border-b border-border/20">
-        <span className="text-[10px] text-gray-400 truncate flex-1">{url}</span>
-        <button onClick={onCopy} className="text-[10px] text-gray-500 hover:text-gray-300 shrink-0 px-1.5 py-0.5 rounded border border-border/30 hover:border-border/60 transition-all" title="Copy link">
-          {copied ? "Copied!" : "Copy"}
-        </button>
-        <button onClick={onShare} className="text-[10px] text-gray-500 hover:text-gray-300 shrink-0 px-1.5 py-0.5 rounded border border-border/30 hover:border-border/60 transition-all" title="Share">
-          Share
-        </button>
-        <a href={url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-accent/70 hover:text-accent shrink-0">
-          Open &nearr;
-        </a>
-      </div>
+      {toolbar}
 
-      {loadFailed ? (
+      {/* Reader mode */}
+      {mode === "reader" && article && (
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          <article className="max-w-none">
+            <h1 className="text-lg font-bold text-gray-100 mb-2 leading-tight">{article.title}</h1>
+            <div className="flex items-center gap-2 text-[11px] text-gray-500 mb-4 flex-wrap">
+              {article.author && <span className="text-gray-400">{article.author}</span>}
+              {article.date && <span>{article.date}</span>}
+              <span className="text-gray-600">{article.domain}</span>
+              <span className="text-gray-600">{article.word_count.toLocaleString()} words</span>
+            </div>
+            {article.description && (
+              <p className="text-sm text-gray-400 italic mb-4 pb-3 border-b border-border/20">{article.description}</p>
+            )}
+            <div
+              className="reader-content text-sm text-gray-300 leading-relaxed space-y-3"
+              dangerouslySetInnerHTML={{ __html: article.content }}
+            />
+          </article>
+          <style jsx global>{`
+            .reader-content h1 { font-size: 1.25rem; font-weight: 700; color: #e5e7eb; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+            .reader-content h2 { font-size: 1.1rem; font-weight: 700; color: #e5e7eb; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+            .reader-content h3 { font-size: 1rem; font-weight: 600; color: #d1d5db; margin-top: 1rem; margin-bottom: 0.25rem; }
+            .reader-content h4, .reader-content h5, .reader-content h6 { font-size: 0.9rem; font-weight: 600; color: #d1d5db; margin-top: 0.75rem; }
+            .reader-content p { margin-bottom: 0.5rem; }
+            .reader-content ul, .reader-content ol { padding-left: 1.25rem; margin-bottom: 0.5rem; }
+            .reader-content li { margin-bottom: 0.25rem; }
+            .reader-content blockquote { border-left: 3px solid rgba(139,92,246,0.4); padding-left: 0.75rem; color: #9ca3af; font-style: italic; margin: 0.5rem 0; }
+            .reader-content table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; font-size: 0.8rem; }
+            .reader-content th, .reader-content td { border: 1px solid rgba(255,255,255,0.08); padding: 4px 8px; text-align: left; }
+            .reader-content th { background: rgba(255,255,255,0.04); font-weight: 600; }
+            .reader-content pre { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 12px; overflow-x: auto; font-size: 0.8rem; }
+          `}</style>
+        </div>
+      )}
+
+      {/* Loading reader */}
+      {mode === "loading-reader" && (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3">
+          <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+          <span className="text-xs text-gray-500">Extracting article content...</span>
+          <span className="text-[10px] text-gray-600">Reader mode for blocked sites</span>
+        </div>
+      )}
+
+      {/* Error state */}
+      {mode === "error" && (
         <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center">
           <div className="w-12 h-12 rounded-full bg-surface flex items-center justify-center">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -121,17 +209,19 @@ function EmbeddedBrowser({ url, title, onCopy, onShare, copied }: {
             </svg>
           </div>
           <div>
-            <p className="text-sm text-gray-300 font-medium">This site cannot be embedded</p>
-            <p className="text-xs text-gray-500 mt-1">The website blocked inline preview (X-Frame-Options)</p>
+            <p className="text-sm text-gray-300 font-medium">Could not load article</p>
+            <p className="text-xs text-gray-500 mt-1">{readerError || "Content extraction failed"}</p>
           </div>
           <a href={url} target="_blank" rel="noopener noreferrer" className="px-4 py-2 rounded-lg bg-accent/90 hover:bg-accent text-white text-sm font-medium transition-colors">
             Open in new tab &nearr;
           </a>
-          <p className="text-[10px] text-gray-600 mt-1">{title}</p>
         </div>
-      ) : (
+      )}
+
+      {/* Iframe mode */}
+      {mode === "iframe" && (
         <div className="flex-1 relative">
-          {loading && (
+          {iframeLoading && (
             <div className="absolute inset-0 flex items-center justify-center bg-[#131316] z-10">
               <div className="flex flex-col items-center gap-2">
                 <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />

@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   frontend:
     name: Frontend Build
@@ -64,6 +68,12 @@ jobs:
               "src.backend.agents.trust",
               "src.backend.agents.decision_tree",
               "src.backend.agents.phi_masker",
+              "src.backend.agents.prescription",
+              "src.backend.agents.izlem",
+              "src.backend.tools.izlem",
+              "src.backend.tools.izlem_rag",
+              "src.backend.tools.izlem_pdf",
+              "src.backend.tools.reader_proxy",
               "src.backend.core.orchestrator",
               "src.backend.core.memory",
           ]
