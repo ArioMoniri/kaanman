@@ -19,6 +19,7 @@ from src.backend.core.config import settings
 
 _pool: aioredis.Redis | None = None
 _TTL = 86400  # 24 hours
+_PATIENT_CACHE_TTL = 10800  # 3 hours — global patient data cache
 
 
 async def get_redis() -> aioredis.Redis:
@@ -26,6 +27,32 @@ async def get_redis() -> aioredis.Redis:
     if _pool is None:
         _pool = aioredis.from_url(settings.redis_url, decode_responses=True)
     return _pool
+
+
+# ── Global patient cache (shared across all sessions for the same protocol) ──
+
+async def get_global_patient_cache(protocol_id: str) -> dict[str, Any] | None:
+    """Retrieve cached patient data by protocol ID (3-hour TTL, cross-session).
+
+    When a doctor queries the same patient within 3 hours (e.g. opens from
+    history or starts a new chat), we reuse the cached data instead of
+    re-fetching from the EHR API.
+    """
+    r = await get_redis()
+    raw = await r.get(f"cerebralink:patient_cache:{protocol_id}")
+    if raw:
+        return json.loads(raw)
+    return None
+
+
+async def set_global_patient_cache(protocol_id: str, data: dict[str, Any]) -> None:
+    """Cache patient data globally by protocol ID with 3-hour TTL."""
+    r = await get_redis()
+    await r.set(
+        f"cerebralink:patient_cache:{protocol_id}",
+        json.dumps(data, ensure_ascii=False),
+    )
+    await r.expire(f"cerebralink:patient_cache:{protocol_id}", _PATIENT_CACHE_TTL)
 
 
 class SessionMemory:

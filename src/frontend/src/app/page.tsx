@@ -904,6 +904,8 @@ export default function Home() {
               if (m.agents_used) msg.agents_used = m.agents_used as string[];
               if (m.total_time_ms) msg.total_time_ms = m.total_time_ms as number;
               if (m.language) msg.language = m.language as string;
+              if (m.priority_country) msg.priority_country = m.priority_country as string;
+              if (m.izlem_brief_pdf) msg.izlem_brief_pdf = m.izlem_brief_pdf as string;
             }
             return msg;
           }

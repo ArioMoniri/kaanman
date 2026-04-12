@@ -30,7 +30,10 @@ from src.backend.agents.decision_tree import DecisionTreeAgent
 from src.backend.agents.phi_masker import PhiMasker
 from src.backend.agents.reports import ReportsAgent
 from src.backend.agents.episodes import EpisodesAgent
-from src.backend.core.memory import AgentMemory, SharedMemory, SessionMemory
+from src.backend.core.memory import (
+    AgentMemory, SharedMemory, SessionMemory,
+    get_global_patient_cache, set_global_patient_cache,
+)
 from src.backend.api.schemas import (
     TrustScores, TrustReasons, GuidelineRef, Citation, AgentTiming,
     DecisionTree, DecisionTreeNode, DecisionTreeEdge,
@@ -237,172 +240,201 @@ class Orchestrator:
         izlem_data = None
 
         if detected_pid and not patient_context:
-            await self._emit(on_status, {
-                "agent": "patient_fetch", "status": "running",
-                "message": f"Fetching patient {detected_pid}...",
-                "phase": "patient_fetch",
-            })
+            # Check global patient cache first (3-hour TTL, cross-session)
+            # This avoids re-fetching the same patient from EHR API when:
+            # - Opening a chat from history within 3 hours
+            # - Starting a new chat for a recently-queried patient
+            cached_patient = await get_global_patient_cache(detected_pid)
+            if cached_patient:
+                patient_context = cached_patient
+                mem = SessionMemory(session_id)
+                await mem.set_patient_context(patient_context)
+                result.patient_context = patient_context
+                result.agents_used.append("patient_fetch")
+                result.agent_timings.append(AgentTiming(agent="patient_fetch", time_ms=0))
+                await self._emit(on_status, {
+                    "agent": "patient_fetch", "status": "done",
+                    "time_ms": 0,
+                    "message": "Patient data loaded from cache (< 3h)",
+                })
+                # Neo4j: ingest patient history in background (non-blocking)
+                if neo4j_available() and patient_context:
+                    try:
+                        ingest_patient_history(patient_context)
+                    except Exception:
+                        pass
 
-            # Fetch patient data and reports in parallel
-            t0 = time.monotonic()
+            if not patient_context:
+                # No cache hit — fetch fresh from EHR API
+                await self._emit(on_status, {
+                    "agent": "patient_fetch", "status": "running",
+                    "message": f"Fetching patient {detected_pid}...",
+                    "phase": "patient_fetch",
+                })
 
-            async def _fetch_patient_data():
-                raw_patient = await auto_fetch_patient(detected_pid)
-                masked = await self.phi_checker.mask_patient_record(raw_patient)
-                return masked.get("masked_record", raw_patient)
+                # Fetch patient data and reports in parallel
+                t0 = time.monotonic()
 
-            async def _fetch_reports_data():
-                """Fetch reports if not already on disk."""
-                if reports_exist(detected_pid):
-                    return get_manifest(detected_pid), str(get_reports_dir(detected_pid))
+                async def _fetch_patient_data():
+                    raw_patient = await auto_fetch_patient(detected_pid)
+                    masked = await self.phi_checker.mask_patient_record(raw_patient)
+                    masked_data = masked.get("masked_record", raw_patient)
+                    # Store in global cache for 3-hour reuse across sessions
+                    await set_global_patient_cache(detected_pid, masked_data)
+                    return masked_data
+
+                async def _fetch_reports_data():
+                    """Fetch reports if not already on disk."""
+                    if reports_exist(detected_pid):
+                        return get_manifest(detected_pid), str(get_reports_dir(detected_pid))
+                    try:
+                        await self._emit(on_status, {
+                            "agent": "reports_fetch", "status": "running",
+                            "message": f"Fetching reports for {detected_pid}...",
+                            "phase": "patient_fetch",
+                        })
+                        rdata = await auto_fetch_reports(detected_pid)
+                        return rdata["manifest"], rdata["reports_dir"]
+                    except Exception as re:
+                        logging.getLogger("cerebralink.orchestrator").warning(
+                            "Reports fetch failed for %s: %s", detected_pid, re
+                        )
+                        return None, None
+
+                async def _fetch_episodes_data():
+                    """Fetch episodes if not already on disk."""
+                    if episodes_exist(detected_pid):
+                        return get_episodes_manifest(detected_pid), str(get_episodes_dir(detected_pid))
+                    try:
+                        await self._emit(on_status, {
+                            "agent": "episodes_fetch", "status": "running",
+                            "message": f"Fetching episodes for {detected_pid}...",
+                            "phase": "patient_fetch",
+                        })
+                        edata = await auto_fetch_episodes(detected_pid)
+                        return edata["manifest"], edata["episodes_dir"]
+                    except Exception as ee:
+                        logging.getLogger("cerebralink.orchestrator").warning(
+                            "Episodes fetch failed for %s: %s", detected_pid, ee
+                        )
+                        return None, None
+
+                async def _fetch_izlem_data():
+                    """Fetch izlem (monitoring) data if available."""
+                    if izlem_exists(detected_pid):
+                        return get_izlem_data(detected_pid)
+                    try:
+                        await self._emit(on_status, {
+                            "agent": "izlem_fetch", "status": "running",
+                            "message": f"Fetching monitoring data for {detected_pid}...",
+                            "phase": "patient_fetch",
+                        })
+                        idata = await auto_fetch_izlem(detected_pid)
+                        return idata
+                    except Exception as ie:
+                        logging.getLogger("cerebralink.orchestrator").warning(
+                            "Izlem fetch failed for %s: %s", detected_pid, ie
+                        )
+                        return None
+
                 try:
-                    await self._emit(on_status, {
-                        "agent": "reports_fetch", "status": "running",
-                        "message": f"Fetching reports for {detected_pid}...",
-                        "phase": "patient_fetch",
-                    })
-                    rdata = await auto_fetch_reports(detected_pid)
-                    return rdata["manifest"], rdata["reports_dir"]
-                except Exception as re:
-                    logging.getLogger("cerebralink.orchestrator").warning(
-                        "Reports fetch failed for %s: %s", detected_pid, re
+                    # return_exceptions=True so one failure doesn't cancel the rest
+                    patient_result, reports_result, episodes_result, izlem_result = await asyncio.gather(
+                        _fetch_patient_data(),
+                        _fetch_reports_data(),
+                        _fetch_episodes_data(),
+                        _fetch_izlem_data(),
+                        return_exceptions=True,
                     )
-                    return None, None
 
-            async def _fetch_episodes_data():
-                """Fetch episodes if not already on disk."""
-                if episodes_exist(detected_pid):
-                    return get_episodes_manifest(detected_pid), str(get_episodes_dir(detected_pid))
-                try:
-                    await self._emit(on_status, {
-                        "agent": "episodes_fetch", "status": "running",
-                        "message": f"Fetching episodes for {detected_pid}...",
-                        "phase": "patient_fetch",
-                    })
-                    edata = await auto_fetch_episodes(detected_pid)
-                    return edata["manifest"], edata["episodes_dir"]
-                except Exception as ee:
-                    logging.getLogger("cerebralink.orchestrator").warning(
-                        "Episodes fetch failed for %s: %s", detected_pid, ee
-                    )
-                    return None, None
+                    t_fetch = int((time.monotonic() - t0) * 1000)
 
-            async def _fetch_izlem_data():
-                """Fetch izlem (monitoring) data if available."""
-                if izlem_exists(detected_pid):
-                    return get_izlem_data(detected_pid)
-                try:
-                    await self._emit(on_status, {
-                        "agent": "izlem_fetch", "status": "running",
-                        "message": f"Fetching monitoring data for {detected_pid}...",
-                        "phase": "patient_fetch",
-                    })
-                    idata = await auto_fetch_izlem(detected_pid)
-                    return idata
-                except Exception as ie:
-                    logging.getLogger("cerebralink.orchestrator").warning(
-                        "Izlem fetch failed for %s: %s", detected_pid, ie
-                    )
-                    return None
+                    # ── Handle patient data result ──
+                    if isinstance(patient_result, Exception):
+                        tb = "".join(traceback.format_exception(type(patient_result), patient_result, patient_result.__traceback__))
+                        logging.getLogger("cerebralink.orchestrator").error(
+                            "Patient fetch error for protocol %s:\n%s", detected_pid, tb
+                        )
+                        await self._emit(on_status, {
+                            "agent": "patient_fetch", "status": "error",
+                            "time_ms": t_fetch,
+                            "message": f"Patient fetch failed: {type(patient_result).__name__}: {patient_result}",
+                        })
+                    else:
+                        patient_context = patient_result
+                        mem = SessionMemory(session_id)
+                        await mem.set_patient_context(patient_context)
+                        result.patient_context = patient_context
 
-            try:
-                # return_exceptions=True so one failure doesn't cancel the rest
-                patient_result, reports_result, episodes_result, izlem_result = await asyncio.gather(
-                    _fetch_patient_data(),
-                    _fetch_reports_data(),
-                    _fetch_episodes_data(),
-                    _fetch_izlem_data(),
-                    return_exceptions=True,
-                )
+                        # Neo4j: ingest patient history in background (non-blocking)
+                        if neo4j_available() and patient_context:
+                            try:
+                                ingest_patient_history(patient_context)
+                            except Exception:
+                                pass  # Graph ingestion is best-effort
 
-                t_fetch = int((time.monotonic() - t0) * 1000)
+                        result.agents_used.append("patient_fetch")
+                        result.agent_timings.append(AgentTiming(agent="patient_fetch", time_ms=t_fetch))
+                        await self._emit(on_status, {
+                            "agent": "patient_fetch", "status": "done",
+                            "time_ms": t_fetch, "message": "Patient data loaded & PHI-masked",
+                        })
 
-                # ── Handle patient data result ──
-                if isinstance(patient_result, Exception):
-                    tb = "".join(traceback.format_exception(type(patient_result), patient_result, patient_result.__traceback__))
-                    logging.getLogger("cerebralink.orchestrator").error(
-                        "Patient fetch error for protocol %s:\n%s", detected_pid, tb
-                    )
+                    # ── Handle reports result (may be tuple or exception) ──
+                    if isinstance(reports_result, Exception):
+                        logging.getLogger("cerebralink.orchestrator").warning(
+                            "Reports fetch failed for %s: %s", detected_pid, reports_result
+                        )
+                    elif isinstance(reports_result, tuple):
+                        reports_manifest, reports_dir_path = reports_result
+                        if reports_manifest:
+                            await self._emit(on_status, {
+                                "agent": "reports_fetch", "status": "done",
+                                "time_ms": t_fetch,
+                                "message": f"Reports loaded: {len(reports_manifest)} reports",
+                            })
+
+                    # ── Handle episodes result (may be tuple or exception) ──
+                    if isinstance(episodes_result, Exception):
+                        logging.getLogger("cerebralink.orchestrator").warning(
+                            "Episodes fetch failed for %s: %s", detected_pid, episodes_result
+                        )
+                    elif isinstance(episodes_result, tuple):
+                        episodes_manifest, episodes_dir_path = episodes_result
+                        if episodes_manifest:
+                            yatis_n = sum(1 for e in episodes_manifest if e.get("is_hospitalization"))
+                            poli_n = len(episodes_manifest) - yatis_n
+                            await self._emit(on_status, {
+                                "agent": "episodes_fetch", "status": "done",
+                                "time_ms": t_fetch,
+                                "message": f"Episodes loaded: {yatis_n} yatış, {poli_n} poliklinik",
+                            })
+
+                    # ── Handle izlem result (may be dict, None, or exception) ──
+                    if isinstance(izlem_result, Exception):
+                        logging.getLogger("cerebralink.orchestrator").warning(
+                            "Izlem fetch failed for %s: %s", detected_pid, izlem_result
+                        )
+                    elif isinstance(izlem_result, dict) and izlem_result:
+                        izlem_data = izlem_result
+                        ep_count = len(izlem_data.get("episodes", []))
+                        await self._emit(on_status, {
+                            "agent": "izlem_fetch", "status": "done",
+                            "time_ms": t_fetch,
+                            "message": f"Monitoring data loaded: {ep_count} episodes",
+                        })
+
+                except Exception as e:
+                    t_fetch = int((time.monotonic() - t0) * 1000)
+                    tb = traceback.format_exc()
                     await self._emit(on_status, {
                         "agent": "patient_fetch", "status": "error",
                         "time_ms": t_fetch,
-                        "message": f"Patient fetch failed: {type(patient_result).__name__}: {patient_result}",
+                        "message": f"Patient fetch failed: {type(e).__name__}: {e}",
                     })
-                else:
-                    patient_context = patient_result
-                    mem = SessionMemory(session_id)
-                    await mem.set_patient_context(patient_context)
-                    result.patient_context = patient_context
-
-                    # Neo4j: ingest patient history in background (non-blocking)
-                    if neo4j_available() and patient_context:
-                        try:
-                            ingest_patient_history(patient_context)
-                        except Exception:
-                            pass  # Graph ingestion is best-effort
-
-                    result.agents_used.append("patient_fetch")
-                    result.agent_timings.append(AgentTiming(agent="patient_fetch", time_ms=t_fetch))
-                    await self._emit(on_status, {
-                        "agent": "patient_fetch", "status": "done",
-                        "time_ms": t_fetch, "message": "Patient data loaded & PHI-masked",
-                    })
-
-                # ── Handle reports result (may be tuple or exception) ──
-                if isinstance(reports_result, Exception):
-                    logging.getLogger("cerebralink.orchestrator").warning(
-                        "Reports fetch failed for %s: %s", detected_pid, reports_result
+                    logging.getLogger("cerebralink.orchestrator").error(
+                        "Patient fetch error for protocol %s:\n%s", detected_pid, tb
                     )
-                elif isinstance(reports_result, tuple):
-                    reports_manifest, reports_dir_path = reports_result
-                    if reports_manifest:
-                        await self._emit(on_status, {
-                            "agent": "reports_fetch", "status": "done",
-                            "time_ms": t_fetch,
-                            "message": f"Reports loaded: {len(reports_manifest)} reports",
-                        })
-
-                # ── Handle episodes result (may be tuple or exception) ──
-                if isinstance(episodes_result, Exception):
-                    logging.getLogger("cerebralink.orchestrator").warning(
-                        "Episodes fetch failed for %s: %s", detected_pid, episodes_result
-                    )
-                elif isinstance(episodes_result, tuple):
-                    episodes_manifest, episodes_dir_path = episodes_result
-                    if episodes_manifest:
-                        yatis_n = sum(1 for e in episodes_manifest if e.get("is_hospitalization"))
-                        poli_n = len(episodes_manifest) - yatis_n
-                        await self._emit(on_status, {
-                            "agent": "episodes_fetch", "status": "done",
-                            "time_ms": t_fetch,
-                            "message": f"Episodes loaded: {yatis_n} yatış, {poli_n} poliklinik",
-                        })
-
-                # ── Handle izlem result (may be dict, None, or exception) ──
-                if isinstance(izlem_result, Exception):
-                    logging.getLogger("cerebralink.orchestrator").warning(
-                        "Izlem fetch failed for %s: %s", detected_pid, izlem_result
-                    )
-                elif isinstance(izlem_result, dict) and izlem_result:
-                    izlem_data = izlem_result
-                    ep_count = len(izlem_data.get("episodes", []))
-                    await self._emit(on_status, {
-                        "agent": "izlem_fetch", "status": "done",
-                        "time_ms": t_fetch,
-                        "message": f"Monitoring data loaded: {ep_count} episodes",
-                    })
-
-            except Exception as e:
-                t_fetch = int((time.monotonic() - t0) * 1000)
-                tb = traceback.format_exc()
-                await self._emit(on_status, {
-                    "agent": "patient_fetch", "status": "error",
-                    "time_ms": t_fetch,
-                    "message": f"Patient fetch failed: {type(e).__name__}: {e}",
-                })
-                logging.getLogger("cerebralink.orchestrator").error(
-                    "Patient fetch error for protocol %s:\n%s", detected_pid, tb
-                )
 
         # ── 2a. Load reports/episodes from disk for follow-up questions ──
         if detected_pid and reports_manifest is None and reports_exist(detected_pid):

@@ -17,7 +17,7 @@ from src.backend.api.schemas import (
     PatientIngestResponse,
     SessionInfoResponse,
 )
-from src.backend.core.memory import SessionMemory
+from src.backend.core.memory import SessionMemory, set_global_patient_cache
 from src.backend.core.orchestrator import Orchestrator
 from src.backend.agents.phi_masker import PhiMasker
 from src.backend.tools.cerebral import ingest_cookies_json
@@ -109,6 +109,8 @@ async def chat(req: ChatRequest):
         "agents_used": result.agents_used,
         "total_time_ms": result.total_time_ms,
         "language": result.language,
+        "priority_country": result.priority_country,
+        "izlem_brief_pdf": result.izlem_brief_pdf,
     })
 
     return ChatResponse(session_id=session_id, **result.model_dump())
@@ -149,6 +151,8 @@ async def chat_stream(req: ChatRequest):
                 "agents_used": result.agents_used,
                 "total_time_ms": result.total_time_ms,
                 "language": result.language,
+                "priority_country": result.priority_country,
+                "izlem_brief_pdf": result.izlem_brief_pdf,
             })
             resp = ChatResponse(session_id=session_id, **result.model_dump())
             await status_queue.put({"_type": "result", "data": resp.model_dump()})
@@ -205,6 +209,15 @@ async def ingest_patient(req: PatientIngestRequest):
 
     await mem.set_patient_context(masked["masked_record"])
     summary = masked.get("summary", "Patient data loaded (PHI masked).")
+
+    # Also write to global patient cache (3-hour TTL) for cross-session reuse
+    pid = (
+        masked["masked_record"].get("patient", {}).get("protocol_no")
+        or masked["masked_record"].get("patient", {}).get("patient_id")
+        or masked["masked_record"].get("protocol_no")
+    )
+    if pid:
+        await set_global_patient_cache(pid, masked["masked_record"])
 
     return PatientIngestResponse(
         success=True, session_id=mem.session_id, patient_summary=summary,

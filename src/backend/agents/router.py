@@ -17,6 +17,60 @@ _PROTOCOL_RE = re.compile(r"\b(\d{7,9})\b")
 # Match protocol numbers with spaces/dashes: "7021 4897", "70 21 48 97", "7021-4897"
 _PROTOCOL_SPACED_RE = re.compile(r"\b(\d{2,5}[\s\-]+(?:\d{2,5}[\s\-]+)*\d{2,5})\b")
 
+# ── Turkish language detection (hard overrides — LLM sometimes fails) ──
+# Turkish-specific characters that don't appear in other Latin-script languages
+_TURKISH_CHARS_RE = re.compile(r"[çÇğĞıİöÖşŞüÜ]")
+# Common Turkish medical/conversational words (case-insensitive)
+_TURKISH_WORDS = [
+    # Medical context
+    "nesi", "nedir", "nasıl", "hastanın", "hastamızın", "hastaya",
+    "hasta", "hastam", "hastamız", "hastanın",
+    "durumu", "tedavi", "tanı", "ilaç", "doktor", "hekim", "hemşire",
+    "muayene", "tetkik", "tahlil", "rapor", "özet", "sonuç", "bulgular",
+    "şikayet", "yakınma", "ağrı", "ateş", "nabız", "tansiyon",
+    "yatış", "taburcu", "ameliyat", "cerrahi", "konsültasyon",
+    "izlem", "takip", "kontrol", "reçete",
+    # Greetings / conversational
+    "merhaba", "selam", "teşekkür", "lütfen", "evet", "hayır",
+    # Common verbs / particles — high frequency in Turkish clinical queries
+    "var", "yok", "ver", "göster", "anlat", "bak", "söyle",
+    "bilgi", "hakkında", "için", "neden", "kaç", "hangi",
+    "olan", "olarak", "olmuş", "oldu", "olsun",
+    "bu", "şu", "bir", "ile", "veya", "ama", "ancak", "mi", "mı",
+    "ne", "kim", "nasıl", "nerede", "kadar",
+]
+_TURKISH_WORDS_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(w) for w in _TURKISH_WORDS) + r")\b",
+    re.IGNORECASE,
+)
+
+# İzlem/monitoring keywords — force needs_izlem=true when detected
+_IZLEM_KEYWORDS = [
+    "izlem", "İzlem", "takip", "vital", "vitaller", "nabız", "tansiyon",
+    "spo2", "ateş", "hemşire notu", "hekim notu", "hekim izlem",
+    "hemşire izlem", "ilaç takib", "ilaç izlem", "kan gazı",
+    "yatış süreci", "yatış", "monitoring", "observation",
+    "izlem özet", "izlem brief", "follow-up", "follow up",
+]
+_IZLEM_RE = re.compile(
+    r"(?:" + "|".join(re.escape(k) for k in _IZLEM_KEYWORDS) + r")",
+    re.IGNORECASE,
+)
+
+
+def _detect_turkish(message: str) -> bool:
+    """Detect Turkish language from message text using characters and common words."""
+    if _TURKISH_CHARS_RE.search(message):
+        return True
+    # Need at least 2 Turkish word matches to avoid false positives
+    matches = _TURKISH_WORDS_RE.findall(message)
+    return len(matches) >= 2
+
+
+def _detect_izlem_keywords(message: str) -> bool:
+    """Detect izlem/monitoring keywords in message."""
+    return bool(_IZLEM_RE.search(message))
+
 
 @dataclass
 class RouteDecision:
@@ -177,5 +231,32 @@ Set needs_decision_tree=true when the query involves:
             decision.needs_clinical = True
             if not decision.category or decision.category in ("GENERAL", "GREETING", "OFF_TOPIC"):
                 decision.category = "CLINICAL_REASONING"
+
+        # Hard override: Turkish language detection — LLM sometimes misdetects
+        # Turkish as English or another language, causing wrong priority_country.
+        is_turkish = _detect_turkish(message)
+        if is_turkish:
+            decision.language = "tr"
+            decision.priority_country = "Turkey"
+            if "Turkey" not in decision.guideline_countries:
+                decision.guideline_countries = ["Turkey"] + [
+                    c for c in decision.guideline_countries if c != "Turkey"
+                ]
+
+        # Hard override: izlem/monitoring keywords — LLM sometimes fails to set
+        # needs_izlem even when the query explicitly asks for monitoring data.
+        if _detect_izlem_keywords(message):
+            decision.needs_izlem = True
+            if not decision.reasoning or "izlem" not in decision.reasoning.lower():
+                decision.reasoning = (
+                    f"{decision.reasoning}; izlem keyword detected — needs_izlem forced"
+                    if decision.reasoning
+                    else "izlem keyword detected — needs_izlem forced"
+                )
+
+        # If we have a protocol ID and Turkish text mentioning izlem,
+        # also ensure the patient context is requested
+        if detected_protocol and decision.needs_izlem:
+            decision.needs_patient_context = True
 
         return decision
