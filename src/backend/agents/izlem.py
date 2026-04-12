@@ -264,37 +264,50 @@ Answer:"""
         lang_label = "Turkish" if language == "tr" else "English"
 
         prompt = f"""Generate a structured clinical monitoring brief for patient protocol {protocol_id}.
+This brief is a DAILY IZLEM REPORT for doctors to quickly understand what happened in the last 24 hours
+and important context from the patient's recent history.
 
 {context}
 
 ## Brief Structure (follow this EXACTLY):
 
-### LAST 24 HOURS SUMMARY
-- Key changes and acute findings
-- Vital signs trends (include specific values)
-- Any alerts or critical findings (abnormal vitals, concerning lab results)
-- Recent doctor/nurse observations
+### SON 24 SAAT ÖZETİ / LAST 24 HOURS SUMMARY
+- Key clinical changes and acute findings in the last 24 hours
+- Vital signs trends with specific values (pulse, BP, SpO2, temp)
+- What the hekim (doctor) did: examinations, orders, medication changes
+- What the hemşire (nurse) observed: patient status, interventions, responses
+- Any critical findings or alerts
+- Lab results from the last 24h if available
 
-### CURRENT MEDICATIONS
-- List all active medications with doses
-- Note any recent changes (new, stopped, dose adjusted)
+### GÜNCEL İLAÇLAR / CURRENT MEDICATIONS
+- List all active medications with doses and routes
+- Highlight any recent changes (new, stopped, dose adjusted) in the last 24h
 
-### EPISODE 1 (Most Recent) -- FULL DETAILS
+### EPİZOD 1 (En Son) / EPISODE 1 (Most Recent)
 - Date, service, facility
 - Doctor notes summary
-- Vital signs table
+- Key vital signs
 - Lab results
 - Medications administered
 
-### EPISODE 2 -- SUMMARY
+### EPİZOD 2 / EPISODE 2
 - Key findings and notable changes
 
-### EPISODE 3 -- SUMMARY
+### EPİZOD 3 / EPISODE 3
 - Key findings and notable changes
 
-### ALERTS & ATTENTION POINTS
-- Abnormal vitals (HR>120, SpO2<92%, Temp>38.5, MAP<65)
-- Significant lab changes
+### DİKKAT GEREKTİREN GEÇMİŞ OLAYLAR / PAST EVENTS REQUIRING ATTENTION
+- Previous falls (düşme) or fall risk
+- Known allergies (alerjiler)
+- Infection history (MRSA, VRE, izolasyon)
+- Pressure sores (basınç yarası, dekübit)
+- Bleeding events (kanama)
+- Intubation/ventilation history
+- Any recurring clinical issue from previous izlems that needs continued attention
+
+### UYARILAR VE ALERTLER / ALERTS
+- Abnormal vitals (HR>120 or <50, SpO2<92%, Temp>38.5°C, MAP<65)
+- Significant lab changes or critical values
 - Infection control concerns
 - Medication interactions or escalation
 

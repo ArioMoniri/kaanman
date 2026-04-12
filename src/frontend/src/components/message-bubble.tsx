@@ -650,7 +650,7 @@ function markdownComponents(
           doctor: `Doctor: "${label}" — View in Knowledge Graph`,
           episode: `Visit: ${label} — View in Knowledge Graph`,
           icd: `ICD-10 code: ${label}`,
-          drug: `Drug: ${label}`,
+          drug: `Drug: "${label}" — View in Knowledge Graph`,
           allergy: `Allergy: "${label}" — View in Knowledge Graph`,
           facility: `Facility: "${label}" — View in Knowledge Graph`,
           report: `Report type: "${label}" — View in Reports Graph`,
@@ -659,7 +659,7 @@ function markdownComponents(
         const tip = tipMap[category] || `${label} — View in Knowledge Graph`;
         const isReport = category === "report";
         const isLabTest = category === "labtest";
-        const canOpenKg = onOpenKgFocus && !["icd", "drug", "report", "labtest"].includes(category);
+        const canOpenKg = onOpenKgFocus && !["icd", "report", "labtest"].includes(category);
         return (
           <button
             className="inline-flex items-center gap-0.5 px-0.5 py-0 rounded text-[inherit] font-inherit transition-all align-baseline leading-inherit"
@@ -679,6 +679,7 @@ function markdownComponents(
               } else if (isLabTest && onOpenTrendForTest) {
                 onOpenTrendForTest(label);
               } else if (canOpenKg) {
+                // Map "drug" category to medication label for KG node matching
                 onOpenKgFocus!(label);
               } else if (onOpenKgFocus) {
                 onOpenKgFocus(label);

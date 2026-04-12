@@ -46,11 +46,18 @@ _TURKISH_WORDS_RE = re.compile(
 
 # İzlem/monitoring keywords — force needs_izlem=true when detected
 _IZLEM_KEYWORDS = [
-    "izlem", "İzlem", "takip", "vital", "vitaller", "nabız", "tansiyon",
+    "izlem", "İzlem", "izlemi", "izleme", "izlemini", "izlemi nasıl",
+    "izlem özet", "izlem özeti", "izlem rapor", "izlem raporu",
+    "izlem brief", "izlem pdf",
+    "takip", "takibi", "takip özeti",
+    "vital", "vitaller", "nabız", "tansiyon",
     "spo2", "ateş", "hemşire notu", "hekim notu", "hekim izlem",
     "hemşire izlem", "ilaç takib", "ilaç izlem", "kan gazı",
     "yatış süreci", "yatış", "monitoring", "observation",
-    "izlem özet", "izlem brief", "follow-up", "follow up",
+    "follow-up", "follow up",
+    "generate izlem", "izlem ver", "özeti ver", "izlem oluştur",
+    "günlük rapor", "daily report", "daily brief",
+    "son 24 saat", "last 24 hours", "last 24h",
 ]
 _IZLEM_RE = re.compile(
     r"(?:" + "|".join(re.escape(k) for k in _IZLEM_KEYWORDS) + r")",
