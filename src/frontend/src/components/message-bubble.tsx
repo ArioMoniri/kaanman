@@ -320,8 +320,8 @@ function preprocessInlineRefs(text: string): string {
   return safe;
 }
 
-/** Pharmaceutical name suffixes — matches generic drug names with high specificity */
-const DRUG_SUFFIX_RE = /\b([A-Za-z]{4,}(?:mab|zumab|ximab|mumab|nib|tinib|fenib|ciclib|pril|sartan|statin|olol|azole|prazole|conazole|cillin|mycin|cycline|floxacin|dipine|zosin|gliptin|glutide|fenac|profen|triptan|setron|vaptan|lukast|semide|thiazide|sertide|terol|sonide|metasone|olone|nisone))\b/gi;
+/** Pharmaceutical name suffixes — matches generic drug names (English + Turkish spellings) */
+const DRUG_SUFFIX_RE = /\b([A-Za-zçÇğĞıİöÖşŞüÜ]{4,}(?:mab|zumab|ximab|mumab|nib|tinib|fenib|ciclib|pril|sartan|statin|olol|azole|prazole|conazole|cillin|mycin|cycline|floxacin|dipine|dipin|zosin|gliptin|glutide|gliflozin|flozin|fenac|afenac|profen|triptan|setron|vaptan|lukast|semide|thiazide|sertide|terol|sonide|metasone|metason|olone|nisone|tiroksin|parin|insülin|insulin|vudine|navir|previr|tadine|zetimib|fibrat|pamid|dronat))\b/gi;
 
 /** ICD-10 code pattern: Letter + 2 digits, optional .digit(s) */
 const ICD_CODE_RE = /\b([A-TV-Z]\d{2}(?:\.\d{1,2})?)\b/g;
@@ -696,17 +696,28 @@ function markdownComponents(
       const isExternalUrl = href && /^https?:\/\//.test(href);
 
       if (isRawUrl && isExternalUrl) {
-        // Render as a compact badge instead of showing the raw URL
+        // Render as a compact badge — color-coded by matching citation's effect size
         let domain = "";
         try { domain = new URL(href).hostname.replace(/^www\./, ""); } catch { domain = "link"; }
+        // Find matching citation by URL to apply effect-size coloring
+        const matchedCite = citations?.find((c) => c.url && href.includes(new URL(c.url).hostname.replace(/^www\./, "")));
+        let badgeStyle: { bg: string; text: string; border: string } | null = null;
+        if (matchedCite) {
+          const variant = getEffectBadgeVariant(matchedCite, (matchedCite.index || 1) - 1, citations?.length || 1);
+          badgeStyle = IMPACT_STYLES[variant] || null;
+        }
         return (
           <button
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 rounded text-[10px] font-semibold bg-accent/10 text-accent/80 hover:bg-accent/20 hover:text-accent transition-all cursor-pointer border border-accent/15 hover:border-accent/30 align-middle leading-none"
-            title={href}
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 rounded text-[10px] font-semibold hover:brightness-125 transition-all cursor-pointer align-middle leading-none"
+            style={badgeStyle
+              ? { background: badgeStyle.bg, color: badgeStyle.text, border: `1px solid ${badgeStyle.border}` }
+              : { background: "rgba(99,102,241,0.10)", color: "rgba(165,180,252,0.8)", border: "1px solid rgba(99,102,241,0.15)" }
+            }
+            title={matchedCite ? `[${matchedCite.index}] ${matchedCite.source} — ${matchedCite.title}` : href}
             onClick={(e) => {
               e.preventDefault();
               if (onOpenReferenceUrl) {
-                onOpenReferenceUrl(href, domain);
+                onOpenReferenceUrl(href, matchedCite?.title || domain);
               } else {
                 window.open(href, "_blank");
               }

@@ -80,17 +80,34 @@ def _build_context(
         else:
             parts.append("[Patient context is available — agents had access to it]")
 
-        # Previous medications
+        # Previous medications/recipes with dates and prescriber info
         recipes = patient_info.get("previous_recipes")
         if recipes and isinstance(recipes, list) and len(recipes) > 0:
             med_lines = []
-            for rx in recipes[:10]:
+            for rx in recipes[:15]:
                 if isinstance(rx, dict):
-                    med_name = rx.get("MedicineName", rx.get("medicine_name", ""))
+                    med_name = (
+                        rx.get("MedicineName")
+                        or rx.get("medicine_name")
+                        or rx.get("name")
+                        or ""
+                    )
+                    rx_date = rx.get("TARIH", rx.get("date", ""))
+                    rx_doc = rx.get("DR_ADI", rx.get("doctor", ""))
+                    rx_episode = rx.get("RF_EPISODE", rx.get("episode_id", ""))
                     if med_name:
-                        med_lines.append(med_name)
+                        line = med_name
+                        if rx_date:
+                            line += f" (tarih: {rx_date}"
+                            if rx_doc:
+                                line += f", dr: {rx_doc}"
+                            line += ")"
+                        med_lines.append(line)
+                    elif rx_date and rx_doc:
+                        # Recipe without drug name — still include metadata
+                        med_lines.append(f"Reçete {rx_date} — {rx_doc} (ep:{rx_episode})")
             if med_lines:
-                parts.append(f"MEDICATIONS: {'; '.join(med_lines)}")
+                parts.append(f"MEDICATIONS/RECIPES: {'; '.join(med_lines)}")
 
     for agent_name, output in agent_outputs.items():
         if isinstance(output, dict):

@@ -158,7 +158,7 @@ def ingest_patient_history(patient_context: dict[str, Any]) -> dict:
                 node_count += 1
                 edge_count += 1
 
-            # 3. Medications
+            # 3. Medications from recipes
             recipes = patient.get("previous_recipes", [])
             for med in (recipes or []):
                 med_name = (
@@ -170,10 +170,15 @@ def ingest_patient_history(patient_context: dict[str, Any]) -> dict:
                 )
                 if not med_name:
                     continue
+                recipe_date = med.get("TARIH", med.get("date", ""))
+                recipe_doctor = med.get("DR_ADI", med.get("doctor", ""))
+                recipe_episode = str(med.get("RF_EPISODE", med.get("episode_id", "")))
                 session.run(
                     """
                     MERGE (m:Medication {name: $name, patient_id: $pid})
-                    SET m.dosage = $dosage
+                    SET m.dosage = $dosage,
+                        m.prescription_date = CASE WHEN $rx_date <> '' THEN $rx_date ELSE m.prescription_date END,
+                        m.prescriber = CASE WHEN $rx_doc <> '' THEN $rx_doc ELSE m.prescriber END
                     WITH m
                     MATCH (p:Patient {patient_id: $pid})
                     MERGE (p)-[:PRESCRIBED]->(m)
@@ -181,7 +186,19 @@ def ingest_patient_history(patient_context: dict[str, Any]) -> dict:
                     pid=str(patient_id),
                     name=med_name,
                     dosage=med.get("dosage", med.get("Dosage", "")),
+                    rx_date=recipe_date,
+                    rx_doc=recipe_doctor,
                 )
+                # Link medication to episode if reference available
+                if recipe_episode and recipe_episode != "":
+                    session.run(
+                        """
+                        MATCH (m:Medication {name: $name, patient_id: $pid})
+                        MATCH (e:Episode {episode_id: $eid, patient_id: $pid})
+                        MERGE (e)-[:PRESCRIBED_IN]->(m)
+                        """,
+                        pid=str(patient_id), name=med_name, eid=recipe_episode,
+                    )
                 node_count += 1
                 edge_count += 1
 
@@ -663,7 +680,7 @@ def ingest_izlem(patient_id: str, izlem_data: dict) -> dict:
                     node_count += 1
                     edge_count += 1
 
-                # MedicationAdmin summary node
+                # MedicationAdmin summary node + individual Medication nodes
                 meds = episode.get("ilac_izlem", [])
                 if meds:
                     session.run(
@@ -680,6 +697,45 @@ def ingest_izlem(patient_id: str, izlem_data: dict) -> dict:
                     )
                     node_count += 1
                     edge_count += 1
+
+                    # Create individual Medication nodes from ilac_izlem records
+                    ep_date = ep_info.get("date", "")
+                    for med_row in meds[:30]:
+                        med_name = (
+                            med_row.get("İlaç Adı")
+                            or med_row.get("Ilac Adi")
+                            or med_row.get("col_0")
+                            or ""
+                        ).strip()
+                        if not med_name:
+                            continue
+                        med_dose = (
+                            med_row.get("Doz")
+                            or med_row.get("col_1")
+                            or ""
+                        ).strip()
+                        med_date = (
+                            med_row.get("Tarih")
+                            or med_row.get("col_4")
+                            or ep_date
+                        ).strip()
+                        session.run(
+                            """
+                            MERGE (m:Medication {name: $name, patient_id: $pid})
+                            SET m.dosage = CASE WHEN $dose <> '' THEN $dose ELSE m.dosage END,
+                                m.prescription_date = CASE WHEN $med_date <> '' THEN $med_date ELSE m.prescription_date END,
+                                m.from_izlem = true
+                            WITH m
+                            MATCH (p:Patient {patient_id: $pid})
+                            MERGE (p)-[:PRESCRIBED]->(m)
+                            WITH m
+                            MATCH (iz:IzlemRecord {episode_id: $eid, patient_id: $pid})
+                            MERGE (iz)-[:PRESCRIBED_IN]->(m)
+                            """,
+                            pid=str(patient_id), name=med_name,
+                            dose=med_dose, med_date=med_date, eid=ep_id,
+                        )
+                        node_count += 1
 
                 # DoctorNote summary node
                 doc_notes = episode.get("hekim_izlem_notlari", [])
