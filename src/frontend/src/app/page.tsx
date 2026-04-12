@@ -11,6 +11,8 @@ import { DecisionTreeViewer } from "@/components/decision-tree-viewer";
 import { ReferenceLegend } from "@/components/reference-legend";
 import { ShimmerText } from "@/components/ui/shimmer-text";
 import { CerebraLinkLogo } from "@/components/ui/cerebralink-logo";
+import { LampBar } from "@/components/ui/lamp-bar";
+import { AgentLogo } from "@/components/ui/agent-logo";
 import { ReportViewer } from "@/components/report-viewer";
 import { TrendMonitor } from "@/components/trend-monitor";
 import { ContextWindowBar } from "@/components/context-window-bar";
@@ -993,6 +995,9 @@ export default function Home() {
           </div>
         </header>
 
+        {/* Purple lamp bar — visible when idle, hidden during agent processing */}
+        <LampBar visible={!isLoading} />
+
         {/* Patient Banner */}
         {patientSummary && <PatientBanner summary={patientSummary} />}
 
@@ -1000,16 +1005,26 @@ export default function Home() {
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-center">
-              <div className="mb-4">
-                <CerebraLinkLogo size={80} />
+              {/* Logos side by side */}
+              <div className="flex items-center gap-4 mb-6">
+                <CerebraLinkLogo size={70} />
+                <AgentLogo size={64} />
               </div>
-              <h2 className="text-xl font-bold text-gray-200 mb-2">
-                CerebraLink
+              {/* Localized greeting */}
+              <h2 className="text-2xl font-extrabold text-gray-100 mb-1 tracking-tight">
+                {typeof navigator !== "undefined" && navigator.language?.startsWith("tr")
+                  ? "Merhaba, ben Link"
+                  : "Hi, I\u2019m Link"}
               </h2>
-              <p className="text-gray-500 max-w-md text-sm leading-relaxed">
-                Medical AI assistant with multi-agent council. Ask any clinical
-                question — get fast and complete answers backed by the latest
-                guidelines with LaTeX calculations.
+              <p className="text-gray-400 max-w-md text-sm leading-relaxed mb-1">
+                {typeof navigator !== "undefined" && navigator.language?.startsWith("tr")
+                  ? "CerebraLink yapay zeka asistanınız. Klinik sorularınızda size yardımcı olmak için buradayım."
+                  : "Your CerebraLink AI assistant. I\u2019m here to help with your clinical questions."}
+              </p>
+              <p className="text-gray-600 text-xs">
+                {typeof navigator !== "undefined" && navigator.language?.startsWith("tr")
+                  ? "Herhangi bir klinik soru sorun \u2014 kanıta dayalı yanıtlar alın."
+                  : "Ask any clinical question \u2014 get evidence-backed answers."}
               </p>
             </div>
           )}

@@ -30,34 +30,39 @@ _PW, _PH = 595, 842
 _ML, _MR, _MT, _MB = 50, 545, 60, 790
 _CONTENT_W = _MR - _ML
 
-# CSS for HTML rendering -- compact medical report style
-# DejaVu Sans is installed in the Docker image; TurkFont is a fallback from pymupdf built-in
+# CSS for HTML rendering -- professional medical report style
+# Inter is installed in Docker image; DejaVu Sans as fallback; TurkFont from pymupdf built-in
 _CSS = """
-body { font-family: "DejaVu Sans", "TurkFont", sans-serif; font-size: 9px; color: #1a1a1a; line-height: 1.4; }
-h1 { font-size: 16px; color: #1a4c99; margin: 10px 0 4px 0; font-weight: 700; }
-h2 { font-size: 13px; color: #1a4c99; margin: 8px 0 3px 0; font-weight: 700;
-     border-bottom: 1px solid #c7d2fe; padding-bottom: 2px; }
-h3 { font-size: 11px; color: #2563eb; margin: 6px 0 2px 0; font-weight: 600; }
-h4 { font-size: 10px; color: #374151; margin: 4px 0 2px 0; font-weight: 600; }
-p { margin: 2px 0; }
-ul, ol { margin: 2px 0; padding-left: 16px; }
+body { font-family: "Inter", "DejaVu Sans", "TurkFont", sans-serif;
+       font-size: 9px; color: #1a1a1a; line-height: 1.5; }
+h1 { font-size: 18px; color: #1e1b4b; margin: 12px 0 6px 0; font-weight: 800;
+     letter-spacing: -0.02em; }
+h2 { font-size: 14px; color: #1e3a5f; margin: 10px 0 4px 0; font-weight: 700;
+     border-bottom: 2px solid #a5b4fc; padding-bottom: 3px; letter-spacing: -0.01em; }
+h3 { font-size: 11px; color: #2563eb; margin: 8px 0 3px 0; font-weight: 700; }
+h4 { font-size: 10px; color: #374151; margin: 5px 0 2px 0; font-weight: 600;
+     font-style: italic; }
+p { margin: 3px 0; }
+ul, ol { margin: 3px 0; padding-left: 18px; }
 li { margin: 1px 0; }
 b, strong { font-weight: 700; }
 i, em { font-style: italic; }
-table { border-collapse: collapse; width: 100%; margin: 4px 0; }
-th { background: #e0e7ff; color: #1e3a5f; font-weight: 700; font-size: 8px;
-     padding: 3px 5px; text-align: left; border: 1px solid #c7d2fe; }
-td { padding: 2px 5px; font-size: 8px; border: 1px solid #e5e7eb; }
-tr:nth-child(even) td { background: #f9fafb; }
-.alert-critical { background: #fde8e8; border-left: 3px solid #dc2626; padding: 4px 8px;
-                   margin: 3px 0; color: #991b1b; font-weight: 600; font-size: 9px; }
-.alert-warning { background: #fef3c7; border-left: 3px solid #d97706; padding: 4px 8px;
-                 margin: 3px 0; color: #92400e; font-weight: 600; font-size: 9px; }
-.note-block { background: #f9fafb; border-left: 2px solid #6b7280; padding: 3px 8px;
-              margin: 2px 0; font-size: 8px; }
-.muted { color: #6b7280; font-size: 8px; }
+table { border-collapse: collapse; width: 100%; margin: 6px 0; }
+th { background: #dbeafe; color: #1e3a5f; font-weight: 700; font-size: 8px;
+     padding: 4px 6px; text-align: left; border: 1px solid #93c5fd; }
+td { padding: 3px 6px; font-size: 8px; border: 1px solid #e5e7eb; }
+tr:nth-child(even) td { background: #f8fafc; }
+.alert-critical { background: #fef2f2; border-left: 4px solid #dc2626; padding: 5px 10px;
+                   margin: 4px 0; color: #991b1b; font-weight: 700; font-size: 9px;
+                   border-radius: 0 4px 4px 0; }
+.alert-warning { background: #fffbeb; border-left: 4px solid #d97706; padding: 5px 10px;
+                 margin: 4px 0; color: #92400e; font-weight: 600; font-size: 9px;
+                 border-radius: 0 4px 4px 0; }
+.note-block { background: #f8fafc; border-left: 3px solid #6366f1; padding: 4px 10px;
+              margin: 3px 0; font-size: 8px; border-radius: 0 4px 4px 0; }
+.muted { color: #6b7280; font-size: 8px; font-style: italic; }
 .small { font-size: 7px; }
-.sep { border-top: 1px solid #d1d5db; margin: 6px 0; }
+.sep { border-top: 2px solid #e0e7ff; margin: 8px 0; }
 .page-break { break-before: page; }
 """
 
