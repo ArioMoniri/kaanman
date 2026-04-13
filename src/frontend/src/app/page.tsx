@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { ChatInput } from "@/components/chat-input";
-import { MessageBubble, type Message, type DeepLinkEntity, type PrescriptionData } from "@/components/message-bubble";
+import { MessageBubble, SkeletonBubble, type Message, type DeepLinkEntity, type PrescriptionData } from "@/components/message-bubble";
 import { PatientBanner } from "@/components/patient-banner";
 import { StatusBar } from "@/components/status-bar";
 import { ReferenceSidebar } from "@/components/reference-sidebar";
@@ -1273,9 +1273,11 @@ export default function Home() {
             />
           ))}
 
-          {/* Status bar + persistent shimmer during loading */}
+          {/* Skeleton + status bar during loading */}
           {isLoading && (
             <>
+              {/* Skeleton loading bubble — mimics assistant message shape */}
+              <SkeletonBubble />
               {agentStatuses.length > 0 ? (
                 <StatusBar
                   agents={agentStatuses}

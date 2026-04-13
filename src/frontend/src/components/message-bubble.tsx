@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { TrustGauges } from "./trust-gauges";
@@ -11,30 +11,53 @@ import { LatexRenderer } from "./latex-renderer";
 /** Inline avatar for assistant messages — small DiceBear lorelei-neutral */
 function LinkAvatar({ size = 28 }: { size?: number }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     const seed = typeof window !== "undefined"
       ? sessionStorage.getItem("cerebralink_avatar_seed") || "link"
       : "link";
-    setUrl(`https://api.dicebear.com/8.x/lorelei-neutral/svg?seed=${seed}`);
+    setUrl(`https://api.dicebear.com/8.x/lorelei-neutral/svg?seed=${seed}&backgroundColor=b6e3f4&backgroundType=solid&scale=85`);
   }, []);
-  if (!url) return <div style={{ width: size, height: size, borderRadius: "50%", background: "#1e1b4b", flexShrink: 0 }} />;
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={url}
-      alt="Link"
-      width={size}
-      height={size}
-      style={{
-        width: size,
-        height: size,
-        borderRadius: "50%",
-        background: "linear-gradient(180deg, #1e1b4b, #0f0a1e)",
-        padding: 2,
-        flexShrink: 0,
-      }}
-      draggable={false}
-    />
+    <div style={{
+      width: size, height: size, borderRadius: "50%", flexShrink: 0,
+      background: "#b6e3f4", overflow: "hidden",
+      boxShadow: "0 0 6px 1px rgba(99,102,241,0.3)",
+    }}>
+      {url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt="Link"
+          width={size}
+          height={size}
+          onLoad={() => setLoaded(true)}
+          style={{
+            width: size, height: size, display: loaded ? "block" : "none",
+            objectFit: "cover",
+          }}
+          draggable={false}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Skeleton shimmer bubble shown while assistant is generating a response */
+export function SkeletonBubble() {
+  return (
+    <div className="flex gap-2.5 max-w-full items-start animate-pulse">
+      <div className="mt-1 flex-shrink-0">
+        <div style={{ width: 28, height: 28, borderRadius: "50%", background: "linear-gradient(135deg, #b6e3f4, #c0aede)" }} />
+      </div>
+      <div className="flex flex-col gap-2 flex-1 min-w-0 py-2">
+        <div style={{ height: 12, width: "75%", borderRadius: 6, background: "linear-gradient(90deg, rgba(99,102,241,0.08) 0%, rgba(99,102,241,0.18) 50%, rgba(99,102,241,0.08) 100%)", backgroundSize: "200% 100%", animation: "skeleton-shimmer 1.8s ease-in-out infinite" }} />
+        <div style={{ height: 12, width: "55%", borderRadius: 6, background: "linear-gradient(90deg, rgba(99,102,241,0.08) 0%, rgba(99,102,241,0.18) 50%, rgba(99,102,241,0.08) 100%)", backgroundSize: "200% 100%", animation: "skeleton-shimmer 1.8s ease-in-out infinite 0.15s" }} />
+        <div style={{ height: 12, width: "65%", borderRadius: 6, background: "linear-gradient(90deg, rgba(99,102,241,0.08) 0%, rgba(99,102,241,0.18) 50%, rgba(99,102,241,0.08) 100%)", backgroundSize: "200% 100%", animation: "skeleton-shimmer 1.8s ease-in-out infinite 0.3s" }} />
+        <div style={{ height: 12, width: "40%", borderRadius: 6, background: "linear-gradient(90deg, rgba(99,102,241,0.08) 0%, rgba(99,102,241,0.18) 50%, rgba(99,102,241,0.08) 100%)", backgroundSize: "200% 100%", animation: "skeleton-shimmer 1.8s ease-in-out infinite 0.45s" }} />
+        <style>{`@keyframes skeleton-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
+      </div>
+    </div>
   );
 }
 
@@ -1244,19 +1267,36 @@ export function MessageBubble({
 
   const [userCopied, setUserCopied] = useState(false);
 
+  const copyUserText = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setUserCopied(true);
+      setTimeout(() => setUserCopied(false), 2000);
+    } catch {}
+  }, [message.content]);
+
   if (message.role === "user") {
     return (
       <div className="flex justify-end group/user">
-        <div className="relative max-w-[85%] rounded-2xl rounded-br-md bg-accent/90 px-4 py-2.5 text-base text-white">
+        <div
+          className="relative max-w-[85%] rounded-2xl rounded-br-md bg-accent/90 px-4 py-2.5 text-base text-white cursor-pointer select-text"
+          onClick={copyUserText}
+          title="Click to copy"
+          style={{ transition: "box-shadow 0.2s" }}
+          onMouseEnter={(e) => { e.currentTarget.style.boxShadow = "0 0 0 1px rgba(255,255,255,0.15)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.boxShadow = "none"; }}
+        >
           {message.content}
+          {/* Copied feedback overlay */}
+          {userCopied && (
+            <span className="absolute inset-0 flex items-center justify-center bg-accent/95 rounded-2xl rounded-br-md text-xs font-medium text-green-300 pointer-events-none">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><polyline points="20 6 9 17 4 12"/></svg>
+              Copied!
+            </span>
+          )}
+          {/* Hover icon indicator */}
           <button
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(message.content);
-                setUserCopied(true);
-                setTimeout(() => setUserCopied(false), 2000);
-              } catch {}
-            }}
+            onClick={(e) => { e.stopPropagation(); copyUserText(); }}
             className="absolute -left-8 top-1/2 -translate-y-1/2 opacity-0 group-hover/user:opacity-100 transition-opacity p-1 rounded hover:bg-white/10"
             title="Copy message"
           >
