@@ -746,6 +746,8 @@ export default function Home() {
       const decoder = new TextDecoder();
       let buffer = "";
       let eventType = "";
+      let receivedDone = false;   // Track whether SSE stream completed normally
+      let receivedAnswer = false; // Track whether we got at least a fast_answer
 
       while (true) {
         const { done, value } = await reader.read();
@@ -758,12 +760,15 @@ export default function Home() {
         for (const line of lines) {
           if (line.startsWith("event: ")) {
             eventType = line.slice(7).trim();
+            if (eventType === "done") receivedDone = true;
           } else if (line.startsWith("data: ")) {
             const dataStr = line.slice(6);
             try {
               const data = JSON.parse(dataStr);
 
-              if (eventType === "status") {
+              if (eventType === "done") {
+                receivedDone = true;
+              } else if (eventType === "status") {
                 setAgentStatuses((prev) => {
                   const existing = prev.findIndex(
                     (a) => a.agent === data.agent
@@ -795,6 +800,7 @@ export default function Home() {
                   // Patient data will come in the result event
                 }
               } else if (eventType === "fast_answer") {
+                receivedAnswer = true;
                 const msgId = crypto.randomUUID();
                 pendingMsgIdRef.current = msgId;
                 const fastMsg: Message = {
@@ -809,6 +815,8 @@ export default function Home() {
                 };
                 setMessages((prev) => [...prev, fastMsg]);
               } else if (eventType === "result") {
+                receivedAnswer = true;
+                receivedDone = true; // result implies completion
                 if (!sessionId) setSessionId(data.session_id);
 
                 // Store patient data if available in the result
@@ -906,14 +914,31 @@ export default function Home() {
           }
         }
       }
+
+      // Stream ended — check if it completed normally
+      if (!receivedDone && !receivedAnswer) {
+        // Stream died before any answer arrived
+        console.error("[CerebraLink] SSE stream closed prematurely — no answer received");
+        const errorMsg: Message = {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: "⚠️ Connection lost before an answer could be generated. The AI pipeline may still be processing. Please try again — if the issue persists, check your network connection.",
+          timestamp: Date.now(),
+        };
+        setMessages((prev) => [...prev, errorMsg]);
+      } else if (!receivedDone && receivedAnswer) {
+        // Got a fast answer but stream died before the complete result
+        console.warn("[CerebraLink] SSE stream closed before complete result — fast answer is displayed");
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         // User cancelled — do nothing
       } else {
+        console.error("[CerebraLink] SSE fetch error:", err);
         const errorMsg: Message = {
           id: crypto.randomUUID(),
           role: "assistant",
-          content: `Connection error: ${err instanceof Error ? err.message : "Unknown error"}. Make sure the backend is running on ${API_URL}.`,
+          content: `⚠️ Connection error: ${err instanceof Error ? err.message : "Unknown error"}. Make sure the backend is running.`,
           timestamp: Date.now(),
         };
         setMessages((prev) => [...prev, errorMsg]);
