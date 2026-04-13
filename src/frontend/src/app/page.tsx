@@ -55,13 +55,13 @@ function ResizableSidebar({ children, onClose }: { children: React.ReactNode; on
 
   return (
     <div
-      className="fixed top-0 right-0 h-screen z-40 bg-[#131316] flex"
+      className="fixed top-0 right-0 h-screen z-40 glass-panel flex"
       style={{ width }}
     >
       {/* Drag handle — wide hit area with visible grip dots */}
       <div
         onMouseDown={handleMouseDown}
-        className="w-4 h-full cursor-col-resize bg-[#1a1a1e] hover:bg-accent/20 active:bg-accent/40 transition-colors border-l border-border/40 shrink-0 flex items-center justify-center group"
+        className="w-4 h-full cursor-col-resize glass-subtle hover:bg-white/[0.08] active:bg-accent/20 transition-colors shrink-0 flex items-center justify-center group"
         style={{ touchAction: "none" }}
       >
         <div className="flex flex-col items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
@@ -368,7 +368,7 @@ function HistoryDrawer({ onClose, onRestore }: { onClose: () => void; onRestore:
   return (
     <div className="fixed inset-0 z-50 flex" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative ml-auto w-full max-w-sm h-full bg-[#111114] border-l border-white/10 flex flex-col shadow-2xl">
+      <div className="relative ml-auto w-full max-w-sm h-full glass-panel flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
           <div className="flex items-center gap-2">
@@ -394,7 +394,7 @@ function HistoryDrawer({ onClose, onRestore }: { onClose: () => void; onRestore:
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search chats by patient, protocol, content..."
-              className="w-full pl-9 pr-8 py-2 text-sm text-gray-200 rounded-lg border border-white/10 bg-white/[0.03] placeholder-gray-600 outline-none focus:border-indigo-500/50 focus:bg-white/[0.05] transition-all"
+              className="w-full pl-9 pr-8 py-2 text-sm text-gray-200 rounded-xl glass-subtle placeholder-gray-600 outline-none focus:border-indigo-500/30 transition-all"
             />
             {searchQuery && (
               <button
@@ -1158,8 +1158,8 @@ export default function Home() {
     <div className="flex h-screen relative">
       {/* Main chat area — always centered */}
       <div className="flex flex-col mx-auto w-full max-w-[720px] min-w-0">
-        {/* Header */}
-        <header className="flex items-center gap-2 px-4 py-2.5 border-b border-border/30">
+        {/* Header — liquid glass */}
+        <header className="glass-header flex items-center gap-2 px-4 py-2.5 relative z-10">
           {/* Logo + title — compact */}
           <div className="flex items-center gap-2 shrink-0">
             <CerebraLinkLogo size={30} />
@@ -1176,7 +1176,7 @@ export default function Home() {
           <div className="flex items-center gap-1.5">
             <button
               onClick={handleNewChat}
-              className="text-[11px] text-gray-400 hover:text-gray-200 transition-colors px-2 py-1 rounded-md border border-border/40 hover:border-border bg-surface/50 hover:bg-surface-light flex items-center gap-1"
+              className="text-[11px] text-gray-400 hover:text-gray-200 transition-all px-2 py-1 rounded-lg glass-btn flex items-center gap-1"
             >
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
@@ -1185,7 +1185,7 @@ export default function Home() {
             </button>
             <button
               onClick={() => setShowHistory(true)}
-              className="text-[11px] text-indigo-400/80 hover:text-indigo-400 transition-colors px-2 py-1 rounded-md border border-indigo-500/25 hover:border-indigo-500/50 flex items-center gap-1 hover:bg-indigo-500/5"
+              className="text-[11px] text-indigo-400/80 hover:text-indigo-400 transition-all px-2 py-1 rounded-lg glass-btn flex items-center gap-1"
               title="Patient History"
             >
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1197,7 +1197,7 @@ export default function Home() {
             {patientData && (
               <button
                 onClick={() => setShowKnowledgeGraph(true)}
-                className="text-[11px] text-emerald-400/80 hover:text-emerald-400 transition-colors px-2 py-1 rounded-md border border-emerald-500/25 hover:border-emerald-500/50 flex items-center gap-1 hover:bg-emerald-500/5"
+                className="text-[11px] text-emerald-400/80 hover:text-emerald-400 transition-all px-2 py-1 rounded-lg glass-btn flex items-center gap-1"
               >
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="3" /><line x1="12" y1="1" x2="12" y2="5" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="4.22" y1="4.22" x2="7.05" y2="7.05" /><line x1="16.95" y1="16.95" x2="19.78" y2="19.78" /><line x1="1" y1="12" x2="5" y2="12" /><line x1="19" y1="12" x2="23" y2="12" />
@@ -1208,7 +1208,7 @@ export default function Home() {
             {patientData && (
               <button
                 onClick={() => handleOpenTrend("")}
-                className="text-[11px] text-sky-400/80 hover:text-sky-400 transition-colors px-2 py-1 rounded-md border border-sky-500/25 hover:border-sky-500/50 flex items-center gap-1 hover:bg-sky-500/5"
+                className="text-[11px] text-sky-400/80 hover:text-sky-400 transition-all px-2 py-1 rounded-lg glass-btn flex items-center gap-1"
                 title="Open lab results trend monitor"
               >
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

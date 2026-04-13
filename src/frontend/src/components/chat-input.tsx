@@ -23,7 +23,7 @@ const TooltipContent = React.forwardRef<
     ref={ref}
     sideOffset={sideOffset}
     className={cn(
-      "z-50 overflow-hidden rounded-md border border-[#333333] bg-[#1F2023] px-3 py-1.5 text-sm text-white shadow-md",
+      "z-50 overflow-hidden rounded-lg glass-strong px-3 py-1.5 text-sm text-white",
       "animate-in fade-in-0 zoom-in-95",
       className
     )}
@@ -525,10 +525,9 @@ export function ChatInput({
 
       <div
         className={cn(
-          "flex items-end gap-2 rounded-3xl border border-[#444444] bg-[#1F2023] px-3 py-2",
-          "shadow-[0_8px_30px_rgba(0,0,0,0.24)] transition-all duration-300",
-          "focus-within:border-[#555555]",
-          voice.isListening && "border-purple-500/50 shadow-[0_0_20px_rgba(168,85,247,0.15)]"
+          "flex items-end gap-2 rounded-3xl glass-input px-3 py-2",
+          "transition-all duration-300",
+          voice.isListening && "border-purple-500/30 shadow-[0_0_20px_rgba(168,85,247,0.12)]"
         )}
       >
         {/* Voice input button */}

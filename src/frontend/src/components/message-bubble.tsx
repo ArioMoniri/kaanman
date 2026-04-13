@@ -1279,7 +1279,7 @@ export function MessageBubble({
     return (
       <div className="flex justify-end group/user">
         <div
-          className="relative max-w-[85%] rounded-2xl rounded-br-md bg-accent/90 px-4 py-2.5 text-base text-white cursor-pointer select-text"
+          className="relative max-w-[85%] rounded-2xl rounded-br-md glass-bubble-user px-4 py-2.5 text-base text-white cursor-pointer select-text"
           onClick={copyUserText}
           title="Click to copy"
           style={{ transition: "box-shadow 0.2s" }}
@@ -1289,7 +1289,7 @@ export function MessageBubble({
           {message.content}
           {/* Copied feedback overlay */}
           {userCopied && (
-            <span className="absolute inset-0 flex items-center justify-center bg-accent/95 rounded-2xl rounded-br-md text-xs font-medium text-green-300 pointer-events-none">
+            <span className="absolute inset-0 flex items-center justify-center bg-indigo-600/80 backdrop-blur-sm rounded-2xl rounded-br-md text-xs font-medium text-green-300 pointer-events-none">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><polyline points="20 6 9 17 4 12"/></svg>
               Copied!
             </span>
@@ -1383,7 +1383,7 @@ export function MessageBubble({
         <LinkAvatar size={28} />
       </div>
       <div className="flex flex-col gap-0 flex-1 min-w-0">
-      <div className="rounded-2xl rounded-bl-md bg-surface-light border border-border/30">
+      <div className="rounded-2xl rounded-bl-md glass-bubble-assistant">
         {/* Country / Language header */}
         {countryFlag && priorityCountry && (
           <div className="flex items-center gap-1.5 px-5 pt-3 text-xs text-gray-400">
@@ -1396,7 +1396,7 @@ export function MessageBubble({
         <div className="flex items-center justify-between px-5 pt-3 pb-2 gap-2 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">
             {hasDualMode ? (
-              <div className="flex gap-1 p-0.5 bg-surface rounded-lg w-fit">
+              <div className="flex gap-1 p-0.5 glass-subtle rounded-lg w-fit">
                 <button
                   onClick={() => setMode("fast")}
                   className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
