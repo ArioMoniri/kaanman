@@ -457,7 +457,7 @@ export function ChatInput({
 }: ChatInputProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const maxHeight = 128;
+  const maxHeight = 200; // ~8-10 lines before scrolling
 
   const handleVoiceTranscript = useCallback((text: string) => {
     setValue((prev) => (prev ? prev + " " + text : text));

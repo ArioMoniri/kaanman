@@ -527,7 +527,53 @@ function preprocessDeepLinks(text: string, entities: DeepLinkEntity[]): string {
     return `[${match}](#kg-drug-${encodeURIComponent(match)})`;
   });
 
-  // 7. Restore placeholders
+  // 7. Common brand-name drugs (Turkish + international) not caught by suffix
+  const BRAND_DRUGS = [
+    "Aspirin", "Coraspin", "Micardis", "Lipitor", "Dideral", "Pantpas",
+    "Concor", "Beloc", "Enapril", "Crestor", "Nexium", "Lansor",
+    "Parol", "Nurofen", "Arveles", "Augmentin", "Cipro", "Flagyl",
+    "Xarelto", "Eliquis", "Plavix", "Glucophage", "Metformin",
+    "Levotiron", "Euthyrox", "Ventolin", "Seretide", "Symbicort",
+  ];
+  for (const drug of BRAND_DRUGS) {
+    const escaped = drug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`\\b(${escaped})\\b`, "gi");
+    safe = safe.replace(re, (match) => {
+      const key = match.toLowerCase();
+      if (linked.has(key)) return match;
+      linked.add(key);
+      return `[${match}](#kg-drug-${encodeURIComponent(match)})`;
+    });
+  }
+
+  // 8. Date patterns (DD.MM.YYYY) — deep link to episode
+  safe = safe.replace(/\b(\d{2}\.\d{2}\.\d{4})\b/g, (match) => {
+    const key = match;
+    if (linked.has(key)) return match;
+    linked.add(key);
+    return `[${match}](#kg-episode-${encodeURIComponent(match)})`;
+  });
+
+  // 9. Department names (Turkish medical departments)
+  const DEPT_NAMES = [
+    "Kardiyoloji", "Gastroenteroloji", "Endokrinoloji", "Üroloji", "Nefroloji",
+    "Nöroloji", "Dermatoloji", "Ortopedi", "Göz Hastalıkları", "KBB",
+    "Göğüs Hastalıkları", "Acil Servis", "Radyoloji", "Patoloji",
+    "Genel Cerrahi", "Fizik Tedavi", "Psikiyatri", "Enfeksiyon",
+    "Hematoloji", "Onkoloji", "Romatoloji", "Pediatri",
+  ];
+  for (const dept of DEPT_NAMES) {
+    const escaped = dept.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`\\b(${escaped})\\b`, "gi");
+    safe = safe.replace(re, (match) => {
+      const key = match.toLowerCase();
+      if (linked.has(key)) return match;
+      linked.add(key);
+      return `[${match}](#kg-department-${encodeURIComponent(match)})`;
+    });
+  }
+
+  // Restore placeholders
   safe = safe.replace(/\x00PH(\d+)\x00/g, (_, idx) => placeholders[parseInt(idx)]);
   return safe;
 }
@@ -876,6 +922,58 @@ function PrescriptionCard({ rxText, prescriptionData, onOpenReferenceUrl, citati
   );
 }
 
+/** Detect ASCII art / box-drawing / timeline blocks and wrap in code fences.
+ *  These come from the LLM as plain text but need monospace rendering. */
+function wrapAsciiArtBlocks(text: string): string {
+  // Pattern: lines containing box-drawing chars (│├└─►▼▲●), timeline markers (──●──),
+  // ASCII bar charts (███░), or alignment pipes (│ ... │) used as visual charts
+  const ASCII_ART_RE = /[│├└┌┐┘┬┴┼─═║╔╗╚╝╠╣╦╩╬►▼▲●█░▒▓]/;
+  const TIMELINE_RE = /\d{4}\s*──/;
+  const BAR_CHART_RE = /[█░▒▓]{3,}/;
+  const PIPE_CHART_RE = /│.*│.*│/;
+
+  const lines = text.split("\n");
+  const result: string[] = [];
+  let inAsciiBlock = false;
+  let blockLines: string[] = [];
+
+  const flushBlock = () => {
+    if (blockLines.length > 0) {
+      result.push("```");
+      result.push(...blockLines);
+      result.push("```");
+      blockLines = [];
+    }
+    inAsciiBlock = false;
+  };
+
+  for (const line of lines) {
+    const isAscii = ASCII_ART_RE.test(line) || TIMELINE_RE.test(line) || BAR_CHART_RE.test(line) || PIPE_CHART_RE.test(line);
+    // Don't wrap table rows (|...|...|) — markdown tables use pipes too
+    const isTable = /^\s*\|.*\|.*\|/.test(line) && !BAR_CHART_RE.test(line);
+
+    if (isAscii && !isTable) {
+      if (!inAsciiBlock) inAsciiBlock = true;
+      blockLines.push(line);
+    } else {
+      if (inAsciiBlock) {
+        // Allow blank lines or short continuation lines inside the block
+        if (line.trim() === "" && blockLines.length > 0) {
+          blockLines.push(line);
+        } else {
+          flushBlock();
+          result.push(line);
+        }
+      } else {
+        result.push(line);
+      }
+    }
+  }
+  if (inAsciiBlock) flushBlock();
+
+  return result.join("\n");
+}
+
 /** Inner markdown renderer — shared between MarkdownContent and PrescriptionCard */
 function MarkdownContentInner({ content, onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus, patientEntities, onOpenReportType, onOpenTrendForTest }: {
   content: string;
@@ -887,7 +985,8 @@ function MarkdownContentInner({ content, onOpenReferenceUrl, citations, onOpenRe
   onOpenReportType?: (reportType: string) => void;
   onOpenTrendForTest?: (testName: string) => void;
 }) {
-  let processed = preprocessInlineRefs(content);
+  let processed = wrapAsciiArtBlocks(content);
+  processed = preprocessInlineRefs(processed);
   processed = preprocessDeepLinks(processed, patientEntities || []);
   const hasLatex = processed.includes("$");
   const components = markdownComponents(onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus, onOpenReportType, onOpenTrendForTest);
@@ -1246,6 +1345,8 @@ interface MessageBubbleProps {
   onOpenReportType?: (reportType: string) => void;
   onOpenTrendForTest?: (testName: string) => void;
   onOpenIzlemPdf?: (pdfPath: string) => void;
+  /** Whether the preceding user message asked for a prescription/Rx */
+  userAskedForRx?: boolean;
 }
 
 export function MessageBubble({
@@ -1260,6 +1361,7 @@ export function MessageBubble({
   onOpenReportType,
   onOpenTrendForTest,
   onOpenIzlemPdf,
+  userAskedForRx,
 }: MessageBubbleProps) {
   const [mode, setMode] = useState<"fast" | "complete" | "highlight">("fast");
   const [showCitations, setShowCitations] = useState(true);
@@ -1539,7 +1641,7 @@ export function MessageBubble({
           {mode === "highlight" && hasDualMode ? (
             <HighlightedContent highlights={highlights} onOpenReferenceUrl={onOpenReferenceUrl} citations={message.citations} onOpenReferences={onOpenReferences} onOpenKgFocus={onOpenKnowledgeGraphFocus} patientEntities={patientEntities} onOpenReportType={onOpenReportType} onOpenTrendForTest={onOpenTrendForTest} />
           ) : (
-            <MarkdownContent content={displayContent} prescriptionData={message.prescription_data} onOpenReferenceUrl={onOpenReferenceUrl} citations={message.citations} onOpenReferences={onOpenReferences} onOpenKgFocus={onOpenKnowledgeGraphFocus} patientEntities={patientEntities} onOpenReportType={onOpenReportType} onOpenTrendForTest={onOpenTrendForTest} />
+            <MarkdownContent content={displayContent} prescriptionData={userAskedForRx !== false ? message.prescription_data : undefined} onOpenReferenceUrl={onOpenReferenceUrl} citations={message.citations} onOpenReferences={onOpenReferences} onOpenKgFocus={onOpenKnowledgeGraphFocus} patientEntities={patientEntities} onOpenReportType={onOpenReportType} onOpenTrendForTest={onOpenTrendForTest} />
           )}
         </div>
 
@@ -1705,14 +1807,28 @@ export function MessageBubble({
                             </button>
                           )}
                         </div>
-                        {/* Title */}
-                        <button
-                          onClick={openInBrowser}
-                          className="text-xs text-gray-400 mt-1 truncate block text-left w-full cursor-pointer hover:text-accent/70 transition-colors"
-                          title={c.url ? `Open: ${c.title}` : c.title}
-                        >
-                          {c.title}
-                        </button>
+                        {/* Title + effect size inline */}
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <button
+                            onClick={openInBrowser}
+                            className="text-xs text-gray-400 truncate text-left flex-1 min-w-0 cursor-pointer hover:text-accent/70 transition-colors"
+                            title={c.url ? `Open: ${c.title}` : c.title}
+                          >
+                            {c.title}
+                          </button>
+                          {c.effect_size && c.effect_size !== "none" && (
+                            <span
+                              style={{
+                                background: c.effect_size === "large" ? "rgba(22,163,74,0.2)" : c.effect_size === "moderate" ? "rgba(37,99,235,0.2)" : "rgba(147,51,234,0.2)",
+                                color: c.effect_size === "large" ? "#4ade80" : c.effect_size === "moderate" ? "#93c5fd" : "#c4b5fd",
+                                border: `1px solid ${c.effect_size === "large" ? "rgba(34,197,94,0.4)" : c.effect_size === "moderate" ? "rgba(59,130,246,0.4)" : "rgba(147,51,234,0.4)"}`,
+                              }}
+                              className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold whitespace-nowrap"
+                            >
+                              {c.effect_size}
+                            </span>
+                          )}
+                        </div>
                         {/* Quote */}
                         {c.quote && (
                           <div className="text-gray-500 mt-0.5 italic text-[11px] line-clamp-2">

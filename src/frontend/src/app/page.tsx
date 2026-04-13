@@ -108,6 +108,13 @@ interface HistoryEntry {
   searchText?: string;
 }
 
+/** Check if a user message is asking for a prescription/Rx */
+const RX_KEYWORDS = /\b(prescri(?:be|ption)|reçete|recete|tedavi\s*yaz|ilaç\s*yaz|ilac\s*yaz|write.*rx|rx\b|tedavi\s*öner|tedavi\s*oner|ilaç\s*öner|ilac\s*oner|tedavi\s*planı|tedavi\s*plani|medication.*order|drug.*order)\b/i;
+
+function userAskedForPrescription(msgContent: string): boolean {
+  return RX_KEYWORDS.test(msgContent);
+}
+
 /** Extract entity names from patient data for Obsidian-style deep links */
 function extractPatientEntities(data: Record<string, unknown> | null): DeepLinkEntity[] {
   if (!data) return [];
@@ -950,10 +957,11 @@ export default function Home() {
     }
   };
 
-  const handleNewChat = async () => {
+  const handleNewChat = () => {
     handleCancel();
     if (sessionId) {
-      await fetch(`${API_URL}/api/patient/clear?session_id=${sessionId}`, {
+      // Fire-and-forget — don't block UI waiting for backend
+      fetch(`${API_URL}/api/patient/clear?session_id=${sessionId}`, {
         method: "POST",
       }).catch(() => {});
     }
@@ -1281,22 +1289,35 @@ export default function Home() {
             </div>
           )}
 
-          {messages.map((msg) => (
-            <MessageBubble
-              key={msg.id}
-              message={msg}
-              onOpenDecisionTree={(tree) => setActiveDecisionTree(tree)}
-              onOpenKnowledgeGraph={() => setShowKnowledgeGraph(true)}
-              onOpenKnowledgeGraphFocus={handleOpenKgWithFocus}
-              onOpenReferences={() => setShowReferences(true)}
-              onOpenReferenceUrl={handleOpenReferenceUrl}
-              hasPatientData={!!patientData}
-              patientEntities={patientEntities}
-              onOpenReportType={handleOpenReportType}
-              onOpenTrendForTest={handleOpenTrend}
-              onOpenIzlemPdf={handleOpenIzlemPdf}
-            />
-          ))}
+          {messages.map((msg, idx) => {
+            // Determine if the user asked for Rx — look at preceding user message
+            let askedForRx: boolean | undefined;
+            if (msg.role === "assistant") {
+              for (let i = idx - 1; i >= 0; i--) {
+                if (messages[i].role === "user") {
+                  askedForRx = userAskedForPrescription(messages[i].content || "");
+                  break;
+                }
+              }
+            }
+            return (
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                onOpenDecisionTree={(tree) => setActiveDecisionTree(tree)}
+                onOpenKnowledgeGraph={() => setShowKnowledgeGraph(true)}
+                onOpenKnowledgeGraphFocus={handleOpenKgWithFocus}
+                onOpenReferences={() => setShowReferences(true)}
+                onOpenReferenceUrl={handleOpenReferenceUrl}
+                hasPatientData={!!patientData}
+                patientEntities={patientEntities}
+                onOpenReportType={handleOpenReportType}
+                onOpenTrendForTest={handleOpenTrend}
+                onOpenIzlemPdf={handleOpenIzlemPdf}
+                userAskedForRx={askedForRx}
+              />
+            );
+          })}
 
           {/* Skeleton + status bar during loading */}
           {isLoading && (

@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -59,7 +61,7 @@ export function ReportViewer({
   const [txtContent, setTxtContent] = useState<string | null>(null);
   const [txtLoading, setTxtLoading] = useState(false);
   const [pacsLoading, setPacsLoading] = useState(false);
-  const txtRef = useRef<HTMLPreElement>(null);
+  const txtRef = useRef<HTMLPreElement | HTMLDivElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
   const iframeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -596,21 +598,34 @@ export function ReportViewer({
                 </div>
               )}
               {!txtLoading && txtContent && (
-                <pre
-                  ref={txtRef}
-                  style={{
-                    fontFamily:
-                      "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
-                    fontSize: 12,
-                    lineHeight: 1.7,
-                    color: "#d1d5db",
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                    margin: 0,
-                  }}
-                >
-                  {txtContent}
-                </pre>
+                fileEndpointType === "izlem" && /^#|^\*\*|\|.*\|/.test(txtContent.trim()) ? (
+                  /* Izlem Brief content is markdown — render it properly */
+                  <div
+                    ref={txtRef as React.RefObject<HTMLDivElement>}
+                    className="prose prose-invert prose-sm max-w-none"
+                    style={{ fontSize: 13, lineHeight: 1.7, color: "#d1d5db" }}
+                  >
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {txtContent}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <pre
+                    ref={txtRef as React.RefObject<HTMLPreElement>}
+                    style={{
+                      fontFamily:
+                        "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
+                      fontSize: 12,
+                      lineHeight: 1.7,
+                      color: "#d1d5db",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                      margin: 0,
+                    }}
+                  >
+                    {txtContent}
+                  </pre>
+                )
               )}
               {!txtLoading && !txtContent && !txtUrl && (
                 <div

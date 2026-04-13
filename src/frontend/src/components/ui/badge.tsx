@@ -19,7 +19,7 @@ const variants = {
   teal: "bg-teal-600 text-white fill-white",
   "teal-subtle": "bg-teal-900/40 text-teal-300 fill-teal-300",
   inverted: "bg-gray-200 text-gray-900 fill-gray-900",
-  pill: "bg-[#1F2023] text-gray-300 fill-gray-300 border border-gray-600/40",
+  pill: "bg-white/[0.06] text-gray-300 fill-gray-300 border border-white/10",
 };
 
 const sizes = {
