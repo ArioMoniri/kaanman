@@ -374,8 +374,23 @@ def get_manifest_with_pacs(protocol_id: str) -> dict | None:
     fresh_all = generate_pacs_url(patient_id, "show_images")
     raw["pacs_all_studies"] = fresh_all
 
+    # Cross-reference pacs_links.json to fill missing accession numbers
+    pacs_links = get_pacs_links(protocol_id)
+    pacs_acc_map: dict[str, str] = {}
+    if pacs_links and pacs_links.get("studies"):
+        for study in pacs_links["studies"]:
+            rid = str(study.get("report_id", ""))
+            acc = study.get("accession_number", "")
+            if rid and acc:
+                pacs_acc_map[rid] = acc
+
     for entry in raw.get("reports", []):
         acc_no = entry.get("accession_number")
+        # Fill from pacs_links.json if not already in manifest
+        if not acc_no and str(entry.get("report_id", "")) in pacs_acc_map:
+            acc_no = pacs_acc_map[str(entry["report_id"])]
+            entry["accession_number"] = acc_no
+            log.info("Filled accession from pacs_links.json: report_id=%s acc=%s", entry.get("report_id"), acc_no)
         if acc_no:
             # Per-study link with accession number
             entry["pacs_url"] = generate_pacs_url(patient_id, "show_study", acc_no)

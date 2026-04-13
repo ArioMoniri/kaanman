@@ -1,12 +1,42 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { TrustGauges } from "./trust-gauges";
 import { RadarChart } from "./radar-chart";
 import { Badge, type BadgeVariant } from "./ui/badge";
 import { LatexRenderer } from "./latex-renderer";
+
+/** Inline avatar for assistant messages — small DiceBear lorelei-neutral */
+function LinkAvatar({ size = 28 }: { size?: number }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const seed = typeof window !== "undefined"
+      ? sessionStorage.getItem("cerebralink_avatar_seed") || "link"
+      : "link";
+    setUrl(`https://api.dicebear.com/8.x/lorelei-neutral/svg?seed=${seed}`);
+  }, []);
+  if (!url) return <div style={{ width: size, height: size, borderRadius: "50%", background: "#1e1b4b", flexShrink: 0 }} />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={url}
+      alt="Link"
+      width={size}
+      height={size}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: "50%",
+        background: "linear-gradient(180deg, #1e1b4b, #0f0a1e)",
+        padding: 2,
+        flexShrink: 0,
+      }}
+      draggable={false}
+    />
+  );
+}
 
 interface TrustScores {
   evidence_quality: number;
@@ -60,6 +90,18 @@ interface DecisionTreeData {
   edges: { id: string; source: string; target: string; label?: string }[];
 }
 
+interface BrandOption {
+  ingredient: string;
+  brands: string[];
+  atc: string;
+}
+
+export interface PrescriptionData {
+  prescription: string;
+  brand_options: BrandOption[];
+  country: string;
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant";
@@ -80,6 +122,7 @@ export interface Message {
   language?: string;
   priority_country?: string;
   izlem_brief_pdf?: string;
+  prescription_data?: PrescriptionData;
   timestamp: number;
 }
 
@@ -139,8 +182,12 @@ function getEffectBadgeVariant(
 ): BadgeVariant {
   // WHO sources get teal badge
   if (citation.country === "WHO") return "teal-subtle";
-  // Priority-country sources get amber badge
-  if (priorityCountry && citation.country === priorityCountry) return "amber";
+
+  // Priority-country: only give amber to the FIRST matching citation.
+  // When query is in the priority language (e.g., Turkish), ALL citations may be
+  // from that country — making them ALL amber and losing visual variety.
+  // Instead: only index 0 gets amber if it matches priority country.
+  if (priorityCountry && citation.country === priorityCountry && index === 0) return "amber";
 
   // Use structured importance/effect_size if available (from AI scorer)
   if (citation.importance || citation.effect_size) {
@@ -150,25 +197,57 @@ function getEffectBadgeVariant(
     return "gray-subtle";
   }
 
-  // Fallback heuristics when structured data is absent
+  // Position-aware fallback: distribute colors visually so badges are NOT uniform.
+  // Works for ALL languages (Turkish, English, etc.) — never produces uniform badges.
   const hasQuote = citation.quote && citation.quote.length > 20;
   const hasUrl = !!citation.url;
   const isRecent = citation.year && citation.year >= new Date().getFullYear() - 3;
-  // Strong evidence signals: has supporting quote + URL + recent
-  if ((hasQuote && hasUrl) || isRecent) return "green";
-  if (hasQuote || hasUrl) return "blue";
-  if (index < Math.ceil(total * 0.4)) return "purple-subtle";
+
+  // Compute a signal score for this specific citation
+  let signals = 0;
+  if (hasQuote) signals++;
+  if (hasUrl) signals++;
+  if (isRecent) signals++;
+  if (citation.evidence_level) signals++;
+  // Boost: any citation with a title gets +1 (shows it has real data)
+  if (citation.title && citation.title.length > 10) signals++;
+  // Boost: any citation with a source gets +1
+  if (citation.source && citation.source.length > 3) signals++;
+
+  // Distribute by position + signal strength to ensure visual variety
+  if (total <= 1) {
+    // Single citation — color by strength
+    return signals >= 3 ? "green" : signals >= 2 ? "blue" : "purple-subtle";
+  }
+
+  // Position tiers: top = green, mid = blue, rest = purple/gray
+  // Modulated by signal strength so strong later citations still rank up
+  const positionRatio = index / (total - 1); // 0.0 = first, 1.0 = last
+  if (positionRatio <= 0.2 && signals >= 2) return "green";
+  if (positionRatio <= 0.2) return "blue";
+  if (positionRatio <= 0.5 && signals >= 3) return "green";
+  if (positionRatio <= 0.5 && signals >= 1) return "blue";
+  if (positionRatio <= 0.5) return "purple-subtle";
+  if (signals >= 3) return "blue";
+  if (signals >= 1) return "purple-subtle";
   return "gray-subtle";
 }
 
 /** Get the impact label + style for a citation — always returns a value */
 function getImpactInfo(citation: Citation, variant: BadgeVariant): { label: string; style: { bg: string; text: string; border: string } } {
-  // Determine label from structured data or heuristics
-  const label = citation.importance
-    ? (citation.importance === "high" ? "High impact" : citation.importance === "medium" ? "Moderate impact" : "Low impact")
-    : citation.effect_size && citation.effect_size !== "none"
-    ? (citation.effect_size === "large" ? "High impact" : citation.effect_size === "moderate" ? "Moderate impact" : "Contextual")
-    : IMPACT_STYLES[variant]?.label || "Low impact";
+  // Determine label from structured data first, then from variant
+  let label: string;
+  if (citation.importance) {
+    label = citation.importance === "high" ? "High impact" : citation.importance === "medium" ? "Moderate impact" : "Low impact";
+  } else if (citation.effect_size && citation.effect_size !== "none") {
+    label = citation.effect_size === "large" ? "High impact" : citation.effect_size === "moderate" ? "Moderate impact" : "Contextual";
+  } else {
+    // Use variant-derived label with evidence_level boost
+    label = IMPACT_STYLES[variant]?.label || "Supporting";
+    if (citation.evidence_level && (variant === "blue" || variant === "purple-subtle")) {
+      label = `${label} (${citation.evidence_level})`;
+    }
+  }
 
   const style = IMPACT_STYLES[variant] || IMPACT_STYLES["gray-subtle"];
   return { label, style };
@@ -522,7 +601,260 @@ function splitLatex(text: string): { content: string; isLatex: boolean; isDispla
 }
 
 /** Markdown renderer with proper styling — includes inline [N] ref support + deep links */
-function MarkdownContent({ content, onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus, patientEntities, onOpenReportType, onOpenTrendForTest }: {
+/** Extract the Rx block from markdown text — looks for RECETE/Rx:/PRESCRIPTION sections */
+function extractRxBlock(text: string): { rxText: string; beforeRx: string; afterRx: string } | null {
+  if (!text) return null;
+  // Match Rx blocks: starts with "Rx:" or "RECETE" or "PRESCRIPTION" heading/line
+  const rxStartPatterns = [
+    /^#{1,4}\s*(?:Rx|REÇETE|RECETE|PRESCRIPTION|Reçete|Tedavi|İlaç Tedavisi|Ilac Tedavisi)\b/im,
+    /^(?:\*{1,2})?(?:Rx|REÇETE|RECETE|PRESCRIPTION|Reçete|Tedavi Önerisi|Tedavi Onerisi)(?:\*{1,2})?[:：\s]/im,
+    /^Rx:\s*$/im,
+    /^(?:\*{1,2})?(?:Önerilen Tedavi|Onerilen Tedavi|Recommended Treatment|İlaç Önerileri|Ilac Onerileri)(?:\*{1,2})?[:：\s]/im,
+  ];
+
+  let startIdx = -1;
+  let matchedPattern = "";
+  for (const pat of rxStartPatterns) {
+    const match = text.match(pat);
+    if (match && match.index !== undefined) {
+      if (startIdx === -1 || match.index < startIdx) {
+        startIdx = match.index;
+        matchedPattern = match[0];
+      }
+    }
+  }
+
+  if (startIdx === -1) return null;
+
+  // Find the end: look for next major section heading or "---" that signals a new topic
+  const afterStart = text.slice(startIdx + matchedPattern.length);
+  const endPatterns = [
+    /\n#{1,4}\s+(?!Rx|Doz|Dose|Kullan|Route|Adet|Quantity|Uyar|Warn|Not:|İlaç|Ilac|Drug|Tedavi)/m,
+    /\n---+\n/m,
+  ];
+
+  let endIdx = text.length;
+  for (const pat of endPatterns) {
+    const match = afterStart.match(pat);
+    if (match && match.index !== undefined) {
+      const absEnd = startIdx + matchedPattern.length + match.index;
+      if (absEnd < endIdx) endIdx = absEnd;
+    }
+  }
+
+  // Include Uyarilar/Warnings sub-section that's part of the Rx
+  const warningMatch = afterStart.match(/\n(?:\*{1,2})?(?:Uyarılar|Uyarilar|Warnings|Dikkat)(?:\*{1,2})?[:：]/im);
+  if (warningMatch && warningMatch.index !== undefined) {
+    const warningStart = startIdx + matchedPattern.length + warningMatch.index;
+    const afterWarning = text.slice(warningStart);
+    const nextSection = afterWarning.match(/\n#{1,4}\s+(?!Uyar|Warn|Dikkat)/m);
+    if (nextSection && nextSection.index !== undefined) {
+      endIdx = Math.max(endIdx, warningStart + nextSection.index);
+    } else {
+      endIdx = text.length;
+    }
+  }
+
+  const rxText = text.slice(startIdx, endIdx).trim();
+  const beforeRx = text.slice(0, startIdx).trim();
+  const afterRx = text.slice(endIdx).trim();
+
+  // Only consider it a valid Rx block if it has drug-related content
+  if (rxText.length < 20) return null;
+  if (!/\d+[.)]\s/.test(rxText) && !/Doz|Dose|mg|ml|mcg|µg|tablet|ampul|flakon|krem|pomad|şampuan|sampuan|cream|ointment|shampoo|oral|topikal|topical/i.test(rxText)) return null;
+
+  return { rxText, beforeRx, afterRx };
+}
+
+/** Prescription card with highlighted styling, brand chips, and copy button */
+function PrescriptionCard({ rxText, prescriptionData, onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus, patientEntities, onOpenReportType, onOpenTrendForTest }: {
+  rxText: string;
+  prescriptionData?: PrescriptionData;
+  onOpenReferenceUrl?: (url: string, title: string) => void;
+  citations?: Citation[];
+  onOpenReferences?: () => void;
+  onOpenKgFocus?: (label: string) => void;
+  patientEntities?: DeepLinkEntity[];
+  onOpenReportType?: (reportType: string) => void;
+  onOpenTrendForTest?: (testName: string) => void;
+}) {
+  const [rxCopied, setRxCopied] = React.useState(false);
+  const [selectedBrands, setSelectedBrands] = React.useState<Record<string, string>>({});
+
+  const handleCopyRx = async () => {
+    // Build copy text: clean markdown, replace "Choose one:" sections with selected brand if any
+    let copyText = rxText
+      .replace(/#{1,6}\s?/g, "")
+      .replace(/\*{1,3}(.*?)\*{1,3}/g, "$1")
+      .replace(/_{1,3}(.*?)_{1,3}/g, "$1")
+      .replace(/`{1,3}[^`]*`{1,3}/g, (m) => m.replace(/`/g, ""))
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .trim();
+
+    // Replace "Choose one: ..." lines with the selected brand
+    for (const [ingredient, brand] of Object.entries(selectedBrands)) {
+      const choosePattern = new RegExp(
+        `Choose one:.*?(?=\\n\\d|\\n\\n|$)`,
+        "gis"
+      );
+      // Only replace if the brand is near the ingredient mention
+      const ingRegex = new RegExp(`(${ingredient.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^\\n]*?)Choose one:[^\\n]*`, "gi");
+      copyText = copyText.replace(ingRegex, `$1→ ${brand}`);
+    }
+
+    try {
+      await navigator.clipboard.writeText(copyText);
+      setRxCopied(true);
+      setTimeout(() => setRxCopied(false), 2000);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = copyText;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setRxCopied(true);
+      setTimeout(() => setRxCopied(false), 2000);
+    }
+  };
+
+  const toggleBrand = (ingredient: string, brand: string) => {
+    setSelectedBrands((prev) => {
+      if (prev[ingredient] === brand) {
+        const next = { ...prev };
+        delete next[ingredient];
+        return next;
+      }
+      return { ...prev, [ingredient]: brand };
+    });
+  };
+
+  const brandOptions = prescriptionData?.brand_options || [];
+
+  return (
+    <div className="my-3 rounded-xl overflow-hidden" style={{
+      background: "linear-gradient(135deg, rgba(34,197,94,0.08) 0%, rgba(16,185,129,0.05) 100%)",
+      border: "1.5px solid rgba(34,197,94,0.3)",
+    }}>
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-2.5" style={{
+        background: "rgba(34,197,94,0.12)",
+        borderBottom: "1px solid rgba(34,197,94,0.2)",
+      }}>
+        <div className="flex items-center gap-2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 12h6m-3-3v6m-7 4h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+          </svg>
+          <span className="text-sm font-bold text-emerald-300">
+            {prescriptionData?.country?.toLowerCase().includes("turk") ? "REÇETE" : "PRESCRIPTION"}
+          </span>
+          {prescriptionData?.country && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{
+              background: "rgba(34,197,94,0.2)",
+              color: "#86efac",
+              border: "1px solid rgba(34,197,94,0.3)",
+            }}>
+              {prescriptionData.country}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={handleCopyRx}
+          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all"
+          style={{
+            background: rxCopied ? "rgba(34,197,94,0.25)" : "rgba(34,197,94,0.15)",
+            color: rxCopied ? "#4ade80" : "#86efac",
+            border: `1px solid ${rxCopied ? "rgba(34,197,94,0.5)" : "rgba(34,197,94,0.3)"}`,
+          }}
+          title="Copy prescription"
+        >
+          {rxCopied ? (
+            <>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+              Copied!
+            </>
+          ) : (
+            <>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy Rx
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Brand selection chips */}
+      {brandOptions.length > 0 && (
+        <div className="px-4 py-3" style={{ borderBottom: "1px solid rgba(34,197,94,0.15)" }}>
+          <div className="text-[11px] font-semibold text-emerald-400/70 mb-2 uppercase tracking-wider">
+            Select Brand Names
+          </div>
+          <div className="space-y-2.5">
+            {brandOptions.map((bo) => (
+              <div key={bo.ingredient}>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-xs font-semibold text-gray-300">{bo.ingredient}</span>
+                  {bo.atc && (
+                    <span className="text-[9px] px-1 py-0.5 rounded bg-gray-700/50 text-gray-500 font-mono">
+                      {bo.atc}
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {bo.brands.slice(0, 8).map((brand) => {
+                    const isSelected = selectedBrands[bo.ingredient] === brand;
+                    return (
+                      <button
+                        key={brand}
+                        onClick={() => toggleBrand(bo.ingredient, brand)}
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all"
+                        style={{
+                          background: isSelected
+                            ? "rgba(34,197,94,0.3)"
+                            : "rgba(107,114,128,0.15)",
+                          color: isSelected ? "#4ade80" : "#d1d5db",
+                          border: `1.5px solid ${isSelected ? "rgba(34,197,94,0.6)" : "rgba(107,114,128,0.25)"}`,
+                          boxShadow: isSelected ? "0 0 8px rgba(34,197,94,0.2)" : "none",
+                        }}
+                        title={`Select ${brand} for ${bo.ingredient}`}
+                      >
+                        {isSelected && (
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="inline mr-1"><polyline points="20 6 9 17 4 12"/></svg>
+                        )}
+                        {brand}
+                      </button>
+                    );
+                  })}
+                  {bo.brands.length > 8 && (
+                    <span className="text-[10px] text-gray-500 self-center">+{bo.brands.length - 8} more</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Rx content */}
+      <div className="px-4 py-3 prose-content rx-content">
+        <MarkdownContentInner
+          content={rxText}
+          onOpenReferenceUrl={onOpenReferenceUrl}
+          citations={citations}
+          onOpenReferences={onOpenReferences}
+          onOpenKgFocus={onOpenKgFocus}
+          patientEntities={patientEntities}
+          onOpenReportType={onOpenReportType}
+          onOpenTrendForTest={onOpenTrendForTest}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Inner markdown renderer — shared between MarkdownContent and PrescriptionCard */
+function MarkdownContentInner({ content, onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus, patientEntities, onOpenReportType, onOpenTrendForTest }: {
   content: string;
   onOpenReferenceUrl?: (url: string, title: string) => void;
   citations?: Citation[];
@@ -540,7 +872,7 @@ function MarkdownContent({ content, onOpenReferenceUrl, citations, onOpenReferen
   if (hasLatex) {
     const segments = splitLatex(processed);
     return (
-      <div className="prose-content">
+      <>
         {segments.map((seg, i) => {
           if (seg.isLatex) {
             return <LatexRenderer key={i} content={seg.content} />;
@@ -551,15 +883,115 @@ function MarkdownContent({ content, onOpenReferenceUrl, citations, onOpenReferen
             </ReactMarkdown>
           );
         })}
+      </>
+    );
+  }
+
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      {processed}
+    </ReactMarkdown>
+  );
+}
+
+function MarkdownContent({ content, prescriptionData, onOpenReferenceUrl, citations, onOpenReferences, onOpenKgFocus, patientEntities, onOpenReportType, onOpenTrendForTest }: {
+  content: string;
+  prescriptionData?: PrescriptionData;
+  onOpenReferenceUrl?: (url: string, title: string) => void;
+  citations?: Citation[];
+  onOpenReferences?: () => void;
+  onOpenKgFocus?: (label: string) => void;
+  patientEntities?: DeepLinkEntity[];
+  onOpenReportType?: (reportType: string) => void;
+  onOpenTrendForTest?: (testName: string) => void;
+}) {
+  // Try to extract Rx block for special rendering
+  const rxExtracted = useMemo(() => extractRxBlock(content), [content]);
+  const hasPrescription = !!(rxExtracted || (prescriptionData?.prescription));
+
+  if (hasPrescription && rxExtracted) {
+    return (
+      <div className="prose-content">
+        {rxExtracted.beforeRx && (
+          <MarkdownContentInner
+            content={rxExtracted.beforeRx}
+            onOpenReferenceUrl={onOpenReferenceUrl}
+            citations={citations}
+            onOpenReferences={onOpenReferences}
+            onOpenKgFocus={onOpenKgFocus}
+            patientEntities={patientEntities}
+            onOpenReportType={onOpenReportType}
+            onOpenTrendForTest={onOpenTrendForTest}
+          />
+        )}
+        <PrescriptionCard
+          rxText={rxExtracted.rxText}
+          prescriptionData={prescriptionData}
+          onOpenReferenceUrl={onOpenReferenceUrl}
+          citations={citations}
+          onOpenReferences={onOpenReferences}
+          onOpenKgFocus={onOpenKgFocus}
+          patientEntities={patientEntities}
+          onOpenReportType={onOpenReportType}
+          onOpenTrendForTest={onOpenTrendForTest}
+        />
+        {rxExtracted.afterRx && (
+          <MarkdownContentInner
+            content={rxExtracted.afterRx}
+            onOpenReferenceUrl={onOpenReferenceUrl}
+            citations={citations}
+            onOpenReferences={onOpenReferences}
+            onOpenKgFocus={onOpenKgFocus}
+            patientEntities={patientEntities}
+            onOpenReportType={onOpenReportType}
+            onOpenTrendForTest={onOpenTrendForTest}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // No Rx block found but we have prescription_data from backend — show as standalone card
+  if (prescriptionData?.prescription && !rxExtracted) {
+    return (
+      <div className="prose-content">
+        <MarkdownContentInner
+          content={content}
+          onOpenReferenceUrl={onOpenReferenceUrl}
+          citations={citations}
+          onOpenReferences={onOpenReferences}
+          onOpenKgFocus={onOpenKgFocus}
+          patientEntities={patientEntities}
+          onOpenReportType={onOpenReportType}
+          onOpenTrendForTest={onOpenTrendForTest}
+        />
+        <PrescriptionCard
+          rxText={prescriptionData.prescription}
+          prescriptionData={prescriptionData}
+          onOpenReferenceUrl={onOpenReferenceUrl}
+          citations={citations}
+          onOpenReferences={onOpenReferences}
+          onOpenKgFocus={onOpenKgFocus}
+          patientEntities={patientEntities}
+          onOpenReportType={onOpenReportType}
+          onOpenTrendForTest={onOpenTrendForTest}
+        />
       </div>
     );
   }
 
   return (
     <div className="prose-content">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {processed}
-      </ReactMarkdown>
+      <MarkdownContentInner
+        content={content}
+        onOpenReferenceUrl={onOpenReferenceUrl}
+        citations={citations}
+        onOpenReferences={onOpenReferences}
+        onOpenKgFocus={onOpenKgFocus}
+        patientEntities={patientEntities}
+        onOpenReportType={onOpenReportType}
+        onOpenTrendForTest={onOpenTrendForTest}
+      />
     </div>
   );
 }
@@ -905,7 +1337,12 @@ export function MessageBubble({
   const countryFlag = priorityCountry ? COUNTRY_FLAGS[priorityCountry] : null;
 
   return (
-    <div className="flex flex-col gap-0 max-w-full">
+    <div className="flex gap-2.5 max-w-full items-start">
+      {/* Assistant avatar */}
+      <div className="mt-1 flex-shrink-0">
+        <LinkAvatar size={28} />
+      </div>
+      <div className="flex flex-col gap-0 flex-1 min-w-0">
       <div className="rounded-2xl rounded-bl-md bg-surface-light border border-border/30">
         {/* Country / Language header */}
         {countryFlag && priorityCountry && (
@@ -1062,7 +1499,7 @@ export function MessageBubble({
           {mode === "highlight" && hasDualMode ? (
             <HighlightedContent highlights={highlights} onOpenReferenceUrl={onOpenReferenceUrl} citations={message.citations} onOpenReferences={onOpenReferences} onOpenKgFocus={onOpenKnowledgeGraphFocus} patientEntities={patientEntities} onOpenReportType={onOpenReportType} onOpenTrendForTest={onOpenTrendForTest} />
           ) : (
-            <MarkdownContent content={displayContent} onOpenReferenceUrl={onOpenReferenceUrl} citations={message.citations} onOpenReferences={onOpenReferences} onOpenKgFocus={onOpenKnowledgeGraphFocus} patientEntities={patientEntities} onOpenReportType={onOpenReportType} onOpenTrendForTest={onOpenTrendForTest} />
+            <MarkdownContent content={displayContent} prescriptionData={message.prescription_data} onOpenReferenceUrl={onOpenReferenceUrl} citations={message.citations} onOpenReferences={onOpenReferences} onOpenKgFocus={onOpenKnowledgeGraphFocus} patientEntities={patientEntities} onOpenReportType={onOpenReportType} onOpenTrendForTest={onOpenTrendForTest} />
           )}
         </div>
 
@@ -1330,6 +1767,7 @@ export function MessageBubble({
               {copied ? "Copied!" : "Copy"}
             </button>
         </div>
+      </div>
       </div>
     </div>
   );

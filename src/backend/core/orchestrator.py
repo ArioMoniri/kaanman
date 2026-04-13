@@ -38,6 +38,7 @@ from src.backend.core.memory import (
 from src.backend.api.schemas import (
     TrustScores, TrustReasons, GuidelineRef, Citation, AgentTiming,
     DecisionTree, DecisionTreeNode, DecisionTreeEdge,
+    PrescriptionData, BrandOption,
 )
 from src.backend.tools.cerebral import auto_fetch_patient
 from src.backend.tools.reports import auto_fetch_reports, reports_exist, get_manifest, get_reports_dir
@@ -120,6 +121,7 @@ class OrchestratorResult:
         self.priority_country: str = ""
         self.patient_context: dict | None = None
         self.izlem_brief_pdf: str | None = None
+        self.prescription_data: PrescriptionData | None = None
 
     def model_dump(self) -> dict:
         return {
@@ -140,6 +142,7 @@ class OrchestratorResult:
             "priority_country": self.priority_country,
             "patient_context": self.patient_context,
             "izlem_brief_pdf": self.izlem_brief_pdf,
+            "prescription_data": self.prescription_data.model_dump() if self.prescription_data else None,
         }
 
 
@@ -652,6 +655,20 @@ class Orchestrator:
                     )
                     elapsed_rx = int((time.monotonic() - t0_rx) * 1000)
                     agent_outputs["prescription"] = rx_result
+                    # Populate prescription_data for frontend
+                    brand_opts = rx_result.get("brand_options", [])
+                    result.prescription_data = PrescriptionData(
+                        prescription=rx_result.get("prescription", ""),
+                        brand_options=[
+                            BrandOption(
+                                ingredient=bo.get("ingredient", ""),
+                                brands=bo.get("brands", []),
+                                atc=bo.get("atc", ""),
+                            )
+                            for bo in brand_opts
+                        ],
+                        country=rx_result.get("country", ""),
+                    )
                     result.agents_used.append("prescription")
                     result.agent_timings.append(AgentTiming(
                         agent="prescription", time_ms=elapsed_rx,
@@ -715,6 +732,7 @@ class Orchestrator:
             "fast_answer": result.fast_answer,
             "guidelines_used": [g.model_dump() for g in result.guidelines_used],
             "citations": [c.model_dump() for c in result.citations],
+            "prescription_data": result.prescription_data.model_dump() if result.prescription_data else None,
         })
 
         # ── 6. Complete answer + Decision Tree in parallel ──
@@ -757,6 +775,7 @@ class Orchestrator:
                 tree_data = await self.decision_tree_agent.generate(
                     query=message, agent_outputs=agent_outputs,
                     patient_context=patient_context,
+                    language=route.language,
                 )
                 elapsed = int((time.monotonic() - t0) * 1000)
                 if tree_data:

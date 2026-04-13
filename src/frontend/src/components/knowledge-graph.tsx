@@ -92,6 +92,14 @@ function GraphNode({ data }: { data: GraphNodeData }) {
 
   const hasDetails = data.detailList && data.detailList.length > 0;
   const hasMeta = data.meta && Object.keys(data.meta).length > 0;
+  // Auto-pin tooltip when node is focused (e.g., via deep-link drug click)
+  const prevFocusedRef = useRef(false);
+  useEffect(() => {
+    if (isFocused && !prevFocusedRef.current) {
+      setPinned(true);
+    }
+    prevFocusedRef.current = isFocused;
+  }, [isFocused]);
   // Always show tooltip on hover/pin — even if only a label is available (Neo4j nodes may lack meta/details)
   const showTooltip = pinned || hovered;
 
@@ -411,6 +419,8 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
   const facilityEpisodes = new Map<string, string[]>();
 
   const episodeNodeIds: string[] = [];
+  // Map from source episode ID → graph node ID (for linking medications to episodes)
+  const episodeIdToNodeId = new Map<string, string>();
 
   /* ============ 3. Create episode nodes & collect metadata ============ */
   episodes.forEach((ep) => {
@@ -422,6 +432,11 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
     const doctor = (ep.doctor_name as string) || (ep.doctorName as string) || "";
     const facility = (ep.facility_name as string) || (ep.facilityName as string) || (ep.facility_text as string) || "";
     const episodeId = (ep.episode_id as string) || (ep.episodeId as string) || "";
+
+    // Track episode ID → node ID mapping for medication linking
+    if (episodeId) {
+      episodeIdToNodeId.set(episodeId, epNodeId);
+    }
 
     if (service) {
       if (!deptEpisodes.has(service)) deptEpisodes.set(service, { nodeIds: [], dates: [] });
@@ -630,12 +645,20 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
         (med.MedicineName as string) ||
         JSON.stringify(med).slice(0, 40);
       const dosage = (med.dosage as string) || (med.Dosage as string) || "";
+      const rxDate = (med.TARIH as string) || (med.date as string) || "";
+      const rxDoctor = (med.DR_ADI as string) || (med.doctor as string) || "";
+      const rxEpisodeId = (med.RF_EPISODE as string) || (med.episode_id as string) || "";
 
       const angle =
         recipes.length === 1
           ? MED_ANGLE_START
           : MED_ANGLE_START - medSpread / 2 + (medSpread / (recipes.length - 1)) * i;
       const pos = polarToCartesian(CX, CY, MED_RADIUS, angle);
+
+      const meta: Record<string, string> = { "Medication": medName };
+      if (dosage) meta["Dosage"] = dosage;
+      if (rxDate) meta["Prescribed"] = rxDate;
+      if (rxDoctor) meta["Doctor"] = rxDoctor;
 
       nodes.push({
         id: medId,
@@ -644,12 +667,17 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
         draggable: true,
         data: {
           label: medName.length > 20 ? medName.slice(0, 18) + "..." : medName,
-          subtitle: dosage || undefined,
+          subtitle: [dosage, rxDate].filter(Boolean).join(" · ") || undefined,
           category: "medication" as NodeCategory,
-          meta: {
-            "Medication": medName,
-            ...(dosage && { Dosage: dosage }),
-          },
+          meta,
+          // Store full name for focus matching (label may be truncated)
+          detailList: [
+            `Drug: ${medName}`,
+            ...(dosage ? [`Dosage: ${dosage}`] : []),
+            ...(rxDate ? [`Date: ${rxDate}`] : []),
+            ...(rxDoctor ? [`Doctor: ${rxDoctor}`] : []),
+            ...(rxEpisodeId ? [`Episode: ${rxEpisodeId}`] : []),
+          ],
         } satisfies GraphNodeData,
       });
 
@@ -659,6 +687,19 @@ function buildGraph(data: Record<string, unknown>): { nodes: Node[]; edges: Edge
         target: medId,
         style: { stroke: COLORS.medication.border, strokeWidth: 1.5 },
       });
+
+      // Link medication to its prescribing episode (for auto-zoom on deep link)
+      if (rxEpisodeId) {
+        const matchingEpNode = episodeIdToNodeId.get(rxEpisodeId);
+        if (matchingEpNode) {
+          edges.push({
+            id: `e-med-ep-${medId}-${matchingEpNode}`,
+            source: medId,
+            target: matchingEpNode,
+            style: { stroke: COLORS.medication.border, strokeWidth: 1, strokeDasharray: "3 3" },
+          });
+        }
+      }
     });
   }
 
@@ -866,7 +907,9 @@ function Legend({ hiddenCategories, onToggleCategory }: {
 
 function StatsBar({ data, onSelect }: { data: Record<string, unknown>; onSelect?: (label: string, category: string) => void }) {
   const [hoveredStat, setHoveredStat] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const statsRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -874,10 +917,19 @@ function StatsBar({ data, onSelect }: { data: Record<string, unknown>; onSelect?
     const handler = (e: MouseEvent) => {
       if (statsRef.current && !statsRef.current.contains(e.target as globalThis.Node)) {
         setHoveredStat(null);
+        setSearchQuery("");
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
+  }, [hoveredStat]);
+
+  // Auto-focus search input when dropdown opens
+  useEffect(() => {
+    if (hoveredStat) {
+      setSearchQuery("");
+      setTimeout(() => searchInputRef.current?.focus(), 50);
+    }
   }, [hoveredStat]);
 
   // Support both top-level and nested patient.episodes structures
@@ -967,8 +1019,11 @@ function StatsBar({ data, onSelect }: { data: Record<string, unknown>; onSelect?
             {label}
           </div>
 
-          {/* Hover dropdown list */}
-          {hoveredStat === label && list.length > 0 && (
+          {/* Dropdown list with search */}
+          {hoveredStat === label && list.length > 0 && (() => {
+            const q = searchQuery.toLowerCase();
+            const filtered = q ? list.filter(([name]) => name.toLowerCase().includes(q)) : list;
+            return (
             <div
               style={{
                 position: "absolute",
@@ -980,28 +1035,65 @@ function StatsBar({ data, onSelect }: { data: Record<string, unknown>; onSelect?
                 border: `1px solid ${color}30`,
                 borderRadius: 12,
                 padding: "8px 0",
-                minWidth: 240,
-                maxWidth: "min(380px, 45vw)",
-                maxHeight: "min(340px, 55vh)",
-                overflowY: "auto",
+                minWidth: 260,
+                maxWidth: "min(400px, 45vw)",
+                maxHeight: "min(400px, 60vh)",
                 zIndex: 100,
                 textAlign: "left",
                 boxShadow: `0 12px 40px rgba(0,0,0,0.7), 0 0 12px ${color}15`,
+                display: "flex",
+                flexDirection: "column" as const,
               }}
             >
-              <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.8, padding: "4px 14px 8px", borderBottom: `1px solid ${color}15`, fontWeight: 600 }}>
-                {label} ({list.length})
+              <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.8, padding: "4px 14px 6px", fontWeight: 600 }}>
+                {label} ({filtered.length}{q ? ` / ${list.length}` : ""})
               </div>
-              {list.map(([name, count], i) => (
+              {/* Search bar */}
+              <div style={{ padding: "0 10px 8px", borderBottom: `1px solid ${color}15` }}>
+                <div style={{ position: "relative" }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)" }}>
+                    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                  </svg>
+                  <input
+                    ref={hoveredStat === label ? searchInputRef : undefined}
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    placeholder={`Search ${label.toLowerCase()}...`}
+                    style={{
+                      width: "100%",
+                      padding: "5px 10px 5px 26px",
+                      fontSize: 11,
+                      color: "#e5e7eb",
+                      background: "rgba(255,255,255,0.06)",
+                      border: `1px solid ${color}25`,
+                      borderRadius: 6,
+                      outline: "none",
+                    }}
+                    onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = `${color}50`; }}
+                    onBlur={(e) => { (e.target as HTMLInputElement).style.borderColor = `${color}25`; }}
+                  />
+                </div>
+              </div>
+              {/* List items */}
+              <div style={{ overflowY: "auto", flex: 1 }}>
+              {filtered.length === 0 && (
+                <div style={{ padding: "12px 14px", fontSize: 11, color: "#6b7280", textAlign: "center" }}>
+                  No matches found
+                </div>
+              )}
+              {filtered.map(([name, count], i) => (
                 <button
                   key={i}
                   onClick={(e) => {
                     e.stopPropagation();
                     if (onSelect) {
-                      // Extract clean name: remove ICD code parenthetical for diagnoses, count suffixes, etc.
                       const cleanName = name.replace(/\s*\(.*$/, "").trim();
                       onSelect(cleanName, label);
                       setHoveredStat(null);
+                      setSearchQuery("");
                     }
                   }}
                   style={{
@@ -1010,7 +1102,7 @@ function StatsBar({ data, onSelect }: { data: Record<string, unknown>; onSelect?
                     fontSize: 11,
                     color: "#d1d5db",
                     padding: "6px 14px",
-                    borderBottom: i < list.length - 1 ? "1px solid rgba(255,255,255,0.03)" : "none",
+                    borderBottom: i < filtered.length - 1 ? "1px solid rgba(255,255,255,0.03)" : "none",
                     display: "flex",
                     justifyContent: "space-between",
                     alignItems: "center",
@@ -1042,8 +1134,10 @@ function StatsBar({ data, onSelect }: { data: Record<string, unknown>; onSelect?
                   </div>
                 </button>
               ))}
+              </div>
             </div>
-          )}
+            );
+          })()}
         </div>
       ))}
     </div>
@@ -1092,6 +1186,38 @@ export function KnowledgeGraph({
     if (focusLabel) {
       setFocusIsolation(true);
       setLocalFocusLabel(null); // deep-link overrides local
+      initialFocusDoneRef.current = false; // allow re-zoom on new focus
+      // Re-zoom to the new focused node after a short delay (graph needs to re-render)
+      setTimeout(() => {
+        if (rfInstance.current) {
+          const currentNodes = rfInstance.current.getNodes();
+          const target = focusLabel.toLowerCase();
+          const targetWords = target.split(/\s+/).filter(w => w.length >= 3);
+          const matchingNodes = currentNodes.filter(n => {
+            const d = n.data as GraphNodeData;
+            const text = [
+              d.label.toLowerCase(),
+              d.subtitle?.toLowerCase() || "",
+              ...(d.meta ? Object.values(d.meta).map(v => v.toLowerCase()) : []),
+              ...(d.detailList ? d.detailList.map(item => item.toLowerCase()) : []),
+            ].join(" ");
+            return text.includes(target) || (targetWords.length > 0 && targetWords.some(w => text.includes(w)));
+          });
+          if (matchingNodes.length > 0) {
+            let cx = 0, cy = 0;
+            matchingNodes.forEach(n => { cx += n.position.x; cy += n.position.y; });
+            cx /= matchingNodes.length;
+            cy /= matchingNodes.length;
+            let maxDist = 0;
+            matchingNodes.forEach(n => {
+              const dist = Math.sqrt((n.position.x - cx) ** 2 + (n.position.y - cy) ** 2);
+              if (dist > maxDist) maxDist = dist;
+            });
+            const zoom = maxDist > 500 ? 0.7 : maxDist > 300 ? 1.0 : maxDist > 150 ? 1.6 : 2.4;
+            rfInstance.current.setCenter(cx + 60, cy + 20, { zoom, duration: 800 });
+          }
+        }
+      }, 500);
     }
   }, [focusLabel, focusMatchesReport, focusMatchesEpisode]);
 
@@ -1134,7 +1260,7 @@ export function KnowledgeGraph({
             const dist = Math.sqrt((n.position.x - cx) ** 2 + (n.position.y - cy) ** 2);
             if (dist > maxDist) maxDist = dist;
           });
-          const zoom = maxDist > 500 ? 0.5 : maxDist > 300 ? 0.75 : maxDist > 150 ? 1.0 : 1.2;
+          const zoom = maxDist > 500 ? 0.6 : maxDist > 300 ? 0.9 : maxDist > 150 ? 1.5 : 2.2;
           rfInstance.current.setCenter(cx + 60, cy + 20, { zoom, duration: 800 });
         }
       }
@@ -1676,7 +1802,10 @@ export function KnowledgeGraph({
                         const dist = Math.sqrt((n.position.x - cx) ** 2 + (n.position.y - cy) ** 2);
                         if (dist > maxDist) maxDist = dist;
                       });
-                      const zoom = maxDist > 500 ? 0.5 : maxDist > 300 ? 0.75 : maxDist > 150 ? 1.0 : 1.2;
+                      // Higher zoom levels for deep links — must be readable at a glance
+                      const zoom = focusedNodes.length <= 2
+                        ? (maxDist > 500 ? 0.8 : maxDist > 200 ? 1.4 : 2.5)
+                        : (maxDist > 500 ? 0.6 : maxDist > 300 ? 0.9 : maxDist > 150 ? 1.5 : 2.2);
 
                       setTimeout(() => {
                         instance.setCenter(cx + 60, cy + 20, { zoom, duration: 800 });

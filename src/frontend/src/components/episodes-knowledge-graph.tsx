@@ -623,30 +623,244 @@ function EpLegend({ hiddenCategories, onToggleCategory }: {
 /*  Stats bar                                                          */
 /* ------------------------------------------------------------------ */
 
-function EpStatsBar({ episodes }: { episodes: EpisodeEntry[] }) {
+function EpStatsBar({ episodes, onFilterChange }: {
+  episodes: EpisodeEntry[];
+  onFilterChange?: (filter: { type?: string; department?: string; doctor?: string; search?: string }) => void;
+}) {
+  const [openStat, setOpenStat] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeFilter, setActiveFilter] = useState<string | null>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!openStat) return;
+    const handler = (e: MouseEvent) => {
+      if (barRef.current && !barRef.current.contains(e.target as globalThis.Node)) {
+        setOpenStat(null);
+        setSearchQuery("");
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [openStat]);
+
+  // Auto-focus search when dropdown opens
+  useEffect(() => {
+    if (openStat) {
+      setSearchQuery("");
+      setTimeout(() => searchInputRef.current?.focus(), 50);
+    }
+  }, [openStat]);
+
   const yatisCount = episodes.filter((e) => e.is_hospitalization).length;
   const poliCount = episodes.length - yatisCount;
-  const deptCount = new Set(episodes.map((e) => e.service_text).filter(Boolean)).size;
-  const docCount = new Set(episodes.map((e) => e.doctor_name).filter(Boolean)).size;
 
-  const stats = [
-    { label: "Yatış", value: yatisCount, color: COLORS.hospitalization.border },
-    { label: "Poliklinik", value: poliCount, color: COLORS.poliklinik.border },
-    { label: "Departments", value: deptCount, color: COLORS.department.border },
-    { label: "Doctors", value: docCount, color: COLORS.doctor.border },
+  // Build lists for each stat
+  const deptMap = new Map<string, number>();
+  const docMap = new Map<string, number>();
+  const diagMap = new Map<string, number>();
+  episodes.forEach((ep) => {
+    if (ep.service_text) deptMap.set(ep.service_text, (deptMap.get(ep.service_text) || 0) + 1);
+    if (ep.doctor_name) docMap.set(ep.doctor_name, (docMap.get(ep.doctor_name) || 0) + 1);
+    (ep.diagnoses || []).forEach((d) => {
+      const lbl = d.icd_code ? `${d.name} (${d.icd_code})` : d.name;
+      if (lbl) diagMap.set(lbl, (diagMap.get(lbl) || 0) + 1);
+    });
+  });
+
+  const sortedDepts = Array.from(deptMap.entries()).sort((a, b) => b[1] - a[1]);
+  const sortedDocs = Array.from(docMap.entries()).sort((a, b) => b[1] - a[1]);
+  const sortedDiags = Array.from(diagMap.entries()).sort((a, b) => b[1] - a[1]);
+
+  // Episode list (date + dept)
+  const episodeList: [string, number][] = episodes.map((ep) => {
+    const label = [ep.date, ep.service_text].filter(Boolean).join(" — ");
+    return [label || "Unknown", ep.is_hospitalization ? 1 : 0] as [string, number];
+  });
+
+  const stats: { label: string; value: number; color: string; list: [string, number][]; filterKey?: string }[] = [
+    { label: "Yatış", value: yatisCount, color: COLORS.hospitalization.border, list: episodeList.filter(([,h]) => h === 1), filterKey: "yatis" },
+    { label: "Poliklinik", value: poliCount, color: COLORS.poliklinik.border, list: episodeList.filter(([,h]) => h === 0), filterKey: "poli" },
+    { label: "Departments", value: deptMap.size, color: COLORS.department.border, list: sortedDepts, filterKey: "department" },
+    { label: "Diagnoses", value: diagMap.size, color: COLORS.diagnosis.border, list: sortedDiags, filterKey: "diagnosis" },
+    { label: "Doctors", value: docMap.size, color: COLORS.doctor.border, list: sortedDocs, filterKey: "doctor" },
   ];
 
   return (
-    <div style={{
-      position: "absolute", top: 12, right: 12, display: "flex", gap: 2,
-      background: "rgba(10,10,14,0.9)", backdropFilter: "blur(12px)",
-      borderRadius: 12, padding: "6px 4px", border: "1px solid rgba(255,255,255,0.08)",
-      zIndex: 30, pointerEvents: "all",
-    }}>
-      {stats.map(({ label, value, color }) => (
-        <div key={label} style={{ textAlign: "center", padding: "4px 14px", borderRadius: 8 }}>
-          <div style={{ fontSize: 18, fontWeight: 800, color, lineHeight: 1.2 }}>{value}</div>
-          <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>{label}</div>
+    <div
+      ref={barRef}
+      style={{
+        position: "absolute", top: 12, right: 12, display: "flex", gap: 2,
+        background: "rgba(10,10,14,0.9)", backdropFilter: "blur(12px)",
+        borderRadius: 12, padding: "6px 4px", border: "1px solid rgba(255,255,255,0.08)",
+        zIndex: 30, pointerEvents: "all",
+      }}
+    >
+      {stats.map(({ label, value, color, list, filterKey }) => (
+        <div
+          key={label}
+          style={{
+            textAlign: "center",
+            position: "relative",
+            cursor: list.length > 0 ? "pointer" : "default",
+            padding: "4px 12px",
+            borderRadius: 8,
+            background: openStat === label ? "rgba(255,255,255,0.06)" : activeFilter === filterKey ? `${color}12` : "transparent",
+            transition: "background 0.2s",
+            borderBottom: activeFilter === filterKey ? `2px solid ${color}` : "2px solid transparent",
+          }}
+          onClick={() => list.length > 0 && setOpenStat(openStat === label ? null : label)}
+        >
+          <div style={{ fontSize: 16, fontWeight: 800, color, lineHeight: 1.2 }}>{value}</div>
+          <div style={{ fontSize: 8, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>{label}</div>
+
+          {/* Dropdown with search */}
+          {openStat === label && list.length > 0 && (() => {
+            const q = searchQuery.toLowerCase();
+            const filtered = q ? list.filter(([name]) => name.toLowerCase().includes(q)) : list;
+            return (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "100%",
+                  right: 0,
+                  marginTop: 8,
+                  background: "linear-gradient(180deg, rgba(15,15,20,0.97), rgba(10,10,14,0.97))",
+                  backdropFilter: "blur(16px)",
+                  border: `1px solid ${color}30`,
+                  borderRadius: 12,
+                  padding: "8px 0",
+                  minWidth: 260,
+                  maxWidth: "min(400px, 45vw)",
+                  maxHeight: "min(400px, 60vh)",
+                  zIndex: 100,
+                  textAlign: "left",
+                  boxShadow: `0 12px 40px rgba(0,0,0,0.7), 0 0 12px ${color}15`,
+                  display: "flex",
+                  flexDirection: "column" as const,
+                }}
+              >
+                <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.8, padding: "4px 14px 6px", fontWeight: 600 }}>
+                  {label} ({filtered.length}{q ? ` / ${list.length}` : ""})
+                </div>
+                {/* Search bar */}
+                <div style={{ padding: "0 10px 8px", borderBottom: `1px solid ${color}15` }}>
+                  <div style={{ position: "relative" }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                      style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)" }}>
+                      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    </svg>
+                    <input
+                      ref={openStat === label ? searchInputRef : undefined}
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      placeholder={`Search ${label.toLowerCase()}...`}
+                      style={{
+                        width: "100%",
+                        padding: "5px 10px 5px 26px",
+                        fontSize: 11,
+                        color: "#e5e7eb",
+                        background: "rgba(255,255,255,0.06)",
+                        border: `1px solid ${color}25`,
+                        borderRadius: 6,
+                        outline: "none",
+                      }}
+                      onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = `${color}50`; }}
+                      onBlur={(e) => { (e.target as HTMLInputElement).style.borderColor = `${color}25`; }}
+                    />
+                  </div>
+                </div>
+                {/* Filter all / clear button */}
+                {filterKey && onFilterChange && (
+                  <div style={{ display: "flex", gap: 4, padding: "4px 10px", borderBottom: `1px solid ${color}10` }}>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveFilter(activeFilter === filterKey ? null : filterKey);
+                        if (activeFilter !== filterKey) {
+                          onFilterChange({ type: filterKey });
+                        } else {
+                          onFilterChange({});
+                        }
+                      }}
+                      style={{
+                        flex: 1, padding: "3px 8px", fontSize: 9, fontWeight: 600,
+                        borderRadius: 4, border: `1px solid ${color}30`,
+                        background: activeFilter === filterKey ? `${color}25` : "transparent",
+                        color: activeFilter === filterKey ? color : "#6b7280",
+                        cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5,
+                      }}
+                    >
+                      {activeFilter === filterKey ? "Clear Filter" : `Filter ${label}`}
+                    </button>
+                  </div>
+                )}
+                {/* Items */}
+                <div style={{ overflowY: "auto", flex: 1 }}>
+                  {filtered.length === 0 && (
+                    <div style={{ padding: "12px 14px", fontSize: 11, color: "#6b7280", textAlign: "center" }}>
+                      No matches found
+                    </div>
+                  )}
+                  {filtered.map(([name, count], i) => (
+                    <button
+                      key={i}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onFilterChange && filterKey) {
+                          const cleanName = name.replace(/\s*\(.*$/, "").trim();
+                          setActiveFilter(filterKey);
+                          onFilterChange({ [filterKey === "yatis" || filterKey === "poli" ? "type" : filterKey]: cleanName });
+                          setOpenStat(null);
+                          setSearchQuery("");
+                        }
+                      }}
+                      style={{
+                        width: "100%",
+                        textAlign: "left",
+                        fontSize: 11,
+                        color: "#d1d5db",
+                        padding: "6px 14px",
+                        borderBottom: i < filtered.length - 1 ? "1px solid rgba(255,255,255,0.03)" : "none",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 10,
+                        transition: "background 0.15s",
+                        border: "none",
+                        background: "transparent",
+                        cursor: "pointer",
+                      }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = `${color}18`; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                      title={`Focus: ${name}`}
+                    >
+                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                        <span style={{
+                          color,
+                          fontWeight: 600,
+                          fontSize: 10,
+                          background: `${color}15`,
+                          padding: "1px 6px",
+                          borderRadius: 6,
+                        }}>
+                          {label === "Yatış" || label === "Poliklinik" ? (count === 1 ? "Y" : "P") : `${count}x`}
+                        </span>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
+                          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                        </svg>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       ))}
     </div>
@@ -666,6 +880,7 @@ function EpisodesKnowledgeGraphInner({
 }: EpisodesKnowledgeGraphProps) {
   const graph = useMemo(() => buildEpisodesGraph(episodes, onOpenEpisode), [episodes, onOpenEpisode]);
   const [hiddenCategories, setHiddenCategories] = useState<Set<EpCategory>>(new Set());
+  const [statsFilter, setStatsFilter] = useState<Record<string, string>>({});
   const reactFlowInstance = useReactFlow();
 
   const toggleCategory = useCallback((cat: EpCategory) => {
@@ -677,10 +892,87 @@ function EpisodesKnowledgeGraphInner({
     });
   }, []);
 
+  // Handler for stats bar filter changes
+  const handleFilterChange = useCallback((filter: Record<string, string>) => {
+    setStatsFilter(filter);
+
+    // If a specific item was selected, zoom to matching nodes
+    const filterValue = filter.department || filter.doctor || filter.diagnosis || filter.search;
+    if (filterValue && reactFlowInstance) {
+      const target = filterValue.toLowerCase();
+      setTimeout(() => {
+        const currentNodes = reactFlowInstance.getNodes();
+        const matchingNodes = currentNodes.filter((n) => {
+          const d = n.data as EpNodeData;
+          const text = [
+            d.label, d.subtitle || "",
+            ...(d.meta ? Object.values(d.meta) : []),
+            ...(d.detailList || []),
+          ].join(" ").toLowerCase();
+          return text.includes(target);
+        });
+        if (matchingNodes.length > 0) {
+          let cx = 0, cy = 0;
+          matchingNodes.forEach((n) => { cx += n.position.x; cy += n.position.y; });
+          cx /= matchingNodes.length;
+          cy /= matchingNodes.length;
+          let maxDist = 0;
+          matchingNodes.forEach((n) => {
+            const dist = Math.sqrt((n.position.x - cx) ** 2 + (n.position.y - cy) ** 2);
+            if (dist > maxDist) maxDist = dist;
+          });
+          const zoom = maxDist > 500 ? 0.6 : maxDist > 300 ? 0.9 : maxDist > 150 ? 1.5 : 2.2;
+          reactFlowInstance.setCenter(cx + 60, cy + 20, { zoom, duration: 800 });
+        }
+      }, 200);
+    }
+  }, [reactFlowInstance]);
+
   const filteredNodes = useMemo(() => {
-    if (hiddenCategories.size === 0) return graph.nodes;
-    return graph.nodes.filter((n) => !hiddenCategories.has((n.data as EpNodeData).category));
-  }, [graph.nodes, hiddenCategories]);
+    let result = graph.nodes;
+    if (hiddenCategories.size > 0) {
+      result = result.filter((n) => !hiddenCategories.has((n.data as EpNodeData).category));
+    }
+
+    // Apply stats filter if active
+    if (statsFilter.department || statsFilter.doctor || statsFilter.type) {
+      const filterTarget = (statsFilter.department || statsFilter.doctor || "").toLowerCase();
+      const filterType = statsFilter.type;
+
+      if (filterTarget || filterType) {
+        // Find matching node IDs
+        const matchedIds = new Set<string>();
+        const patientId = result.find((n) => (n.data as EpNodeData).category === "patient")?.id;
+        if (patientId) matchedIds.add(patientId);
+
+        result.forEach((n) => {
+          const d = n.data as EpNodeData;
+          const text = [d.label, d.subtitle || "", ...(d.meta ? Object.values(d.meta) : []), ...(d.detailList || [])].join(" ").toLowerCase();
+
+          if (filterTarget && text.includes(filterTarget)) {
+            matchedIds.add(n.id);
+          }
+          if (filterType === "yatis" && d.category === "hospitalization") matchedIds.add(n.id);
+          if (filterType === "poli" && d.category === "poliklinik") matchedIds.add(n.id);
+        });
+
+        // Include neighbors of matched nodes
+        const neighborIds = new Set(matchedIds);
+        graph.edges.forEach((e) => {
+          if (matchedIds.has(e.source)) neighborIds.add(e.target);
+          if (matchedIds.has(e.target)) neighborIds.add(e.source);
+        });
+
+        // Mark non-matching nodes as dimmed instead of hiding
+        result = result.map((n) => {
+          if (neighborIds.has(n.id)) return n;
+          return { ...n, style: { ...n.style, opacity: 0.15 } };
+        });
+      }
+    }
+
+    return result;
+  }, [graph.nodes, graph.edges, hiddenCategories, statsFilter]);
 
   const filteredNodeIds = useMemo(() => new Set(filteredNodes.map((n) => n.id)), [filteredNodes]);
   const filteredEdges = useMemo(() => {
@@ -718,18 +1010,23 @@ function EpisodesKnowledgeGraphInner({
   useEffect(() => {
     if (!focusLabel || !reactFlowInstance) return;
     const target = focusLabel.toLowerCase();
+    const targetWords = target.split(/\s+/).filter((w) => w.length >= 3);
     const focusedNode = nodes.find((n) => {
       const d = n.data as EpNodeData;
-      return d.label.toLowerCase().includes(target) ||
-        (d.subtitle && d.subtitle.toLowerCase().includes(target)) ||
-        (d.meta && Object.values(d.meta).some(v => v.toLowerCase().includes(target)));
+      const text = [
+        d.label.toLowerCase(),
+        d.subtitle?.toLowerCase() || "",
+        ...(d.meta ? Object.values(d.meta).map(v => v.toLowerCase()) : []),
+        ...(d.detailList ? d.detailList.map(item => item.toLowerCase()) : []),
+      ].join(" ");
+      return text.includes(target) || (targetWords.length > 0 && targetWords.some(w => text.includes(w)));
     });
     if (focusedNode) {
       setTimeout(() => {
         reactFlowInstance.setCenter(
           focusedNode.position.x + 60,
           focusedNode.position.y + 20,
-          { zoom: 1.5, duration: 800 },
+          { zoom: 2.2, duration: 800 },
         );
       }, 500);
     }
@@ -768,7 +1065,7 @@ function EpisodesKnowledgeGraphInner({
         />
       </ReactFlow>
       <EpLegend hiddenCategories={hiddenCategories} onToggleCategory={toggleCategory} />
-      <EpStatsBar episodes={episodes} />
+      <EpStatsBar episodes={episodes} onFilterChange={handleFilterChange} />
     </div>
   );
 }

@@ -30,6 +30,43 @@ SECTION_HEADERS = {
     "SEROLOJİ", "İDRAR TAHLİLİ", "KAN GRUBU", "KOAGÜLASYON",
     "KOAGÜlASYON", "MİKROBİYOLOJİ", "GAZ", "SEDİMENTASYON",
     "PATOLOJI", "NÜKLEOTİD",
+    # Additional sections commonly seen in Turkish hospitals
+    "İDRAR BİYOKİMYA", "VİTAMİN", "TÜMÖR MARKER", "TUMOR MARKER",
+    "İLAÇ DÜZEYİ", "KAN KÜLTÜRÜ", "İDRAR KÜLTÜRÜ",
+    "FONKSİYON TESTLERİ", "ANEMİ PANELİ", "LİPİD PANELİ",
+    "TİROİD", "KARACİĞER FONKSİYON", "BÖBREK FONKSİYON",
+    "ELEKTROLİT", "KARDİYAK MARKER", "HEMOSTAZ",
+    "OTOIMMUN", "ALLERJİ", "İNFLAMASYON",
+}
+
+# Textual result patterns (Pozitif/Negatif/Reaktif etc.)
+_TEXTUAL_RESULTS: dict[str, float | None] = {
+    "pozitif": 1.0, "positive": 1.0,
+    "negatif": 0.0, "negative": 0.0,
+    "reaktif": 1.0, "reactive": 1.0,
+    "non-reaktif": 0.0, "non-reactive": 0.0, "nonreaktif": 0.0,
+    "normal": None, "anormal": None, "abnormal": None,
+    "yüksek": None, "yuksek": None, "high": None,
+    "düşük": None, "dusuk": None, "low": None,
+    "borderline": None, "sınırda": None, "sinirda": None,
+}
+
+# Critical/panic value thresholds for common tests (case-insensitive test name prefix match)
+_CRITICAL_THRESHOLDS: dict[str, dict[str, float]] = {
+    "potasyum": {"critical_low": 2.5, "critical_high": 6.5},
+    "sodyum": {"critical_low": 120.0, "critical_high": 160.0},
+    "glukoz": {"critical_low": 40.0, "critical_high": 500.0},
+    "kalsiyum": {"critical_low": 6.0, "critical_high": 13.0},
+    "hemoglobin": {"critical_low": 5.0, "critical_high": 20.0},
+    "trombosit": {"critical_low": 20.0, "critical_high": 1000.0},
+    "lökosit": {"critical_low": 1.0, "critical_high": 30.0},
+    "lokosit": {"critical_low": 1.0, "critical_high": 30.0},
+    "inr": {"critical_high": 5.0},
+    "troponin": {"critical_high": 0.4},
+    "laktat": {"critical_high": 4.0},
+    "kreatinin": {"critical_high": 10.0},
+    "bilirübin": {"critical_high": 15.0},
+    "bilirubin": {"critical_high": 15.0},
 }
 
 # Date patterns: DD.MM.YY or DD.MM.YYYY
@@ -55,6 +92,11 @@ class LabValue:
     section: str
     is_abnormal: bool = False
     raw_value: str = ""
+    is_critical: bool = False
+    is_textual: bool = False
+    textual_result: str = ""
+    delta: float | None = None
+    delta_pct: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -67,10 +109,44 @@ def _parse_float(s: str) -> float | None:
     s = s.strip().replace(",", ".")
     # Remove comparison operators
     s = re.sub(r"^[<>≤≥]=?\s*", "", s)
+    # Remove trailing units that may be attached (e.g., "5.16x10^3")
+    s = re.sub(r"[a-zA-Z/^]+$", "", s).strip()
+    # Remove thousand separators: "1.234.5" → "1234.5" (only if multiple dots)
+    if s.count(".") > 1:
+        parts = s.rsplit(".", 1)
+        s = parts[0].replace(".", "") + "." + parts[1]
     try:
         return float(s)
     except ValueError:
         return None
+
+
+def _check_textual_result(raw: str) -> tuple[bool, str]:
+    """Check if a raw value is a textual result (Pozitif, Negatif, etc.).
+
+    Returns (is_textual, textual_result_string).
+    """
+    normalized = raw.strip().lower().replace("İ", "i").replace("I", "ı")
+    for keyword in _TEXTUAL_RESULTS:
+        if keyword in normalized:
+            return True, raw.strip()
+    return False, ""
+
+
+def _check_critical(test_name: str, value: float | None) -> bool:
+    """Check if a lab value falls in the critical/panic range."""
+    if value is None:
+        return False
+    name_lower = test_name.lower().replace("İ", "i").replace("I", "ı")
+    for test_key, thresholds in _CRITICAL_THRESHOLDS.items():
+        if test_key in name_lower:
+            crit_low = thresholds.get("critical_low")
+            crit_high = thresholds.get("critical_high")
+            if crit_low is not None and value < crit_low:
+                return True
+            if crit_high is not None and value > crit_high:
+                return True
+    return False
 
 
 def _parse_ref_range(ref_str: str) -> tuple[float | None, float | None]:
@@ -244,18 +320,25 @@ def _parse_horizontal(lines: list[str], report_date: str) -> list[LabValue]:
             unit = ref_str if not ref_str.replace(".", "").replace("-", "").replace(" ", "").isdigit() else ""
 
         is_abnormal = False
+        is_textual, textual_result = _check_textual_result(raw_value)
         if value is not None:
             if ref_min is not None and value < ref_min:
                 is_abnormal = True
             if ref_max is not None and value > ref_max:
                 is_abnormal = True
+        elif is_textual:
+            # Textual results: "Pozitif" on a test with expected "Negatif" is abnormal
+            is_abnormal = textual_result.lower() in ("pozitif", "positive", "reaktif", "reactive", "anormal", "abnormal")
+
+        is_critical = _check_critical(test_name, value)
 
         if value is not None or raw_value:
             results.append(LabValue(
                 test_name=test_name, value=value, unit=unit,
                 ref_min=ref_min, ref_max=ref_max, date=report_date,
                 section=current_section, is_abnormal=is_abnormal,
-                raw_value=raw_value,
+                raw_value=raw_value, is_critical=is_critical,
+                is_textual=is_textual, textual_result=textual_result,
             ))
 
         hist_values = parts[4:] if len(parts) > 4 else []
@@ -269,11 +352,12 @@ def _parse_horizontal(lines: list[str], report_date: str) -> list[LabValue]:
                 hist_abnormal = True
             if ref_max is not None and hist_val > ref_max:
                 hist_abnormal = True
+            hist_critical = _check_critical(test_name, hist_val)
             results.append(LabValue(
                 test_name=test_name, value=hist_val, unit=unit,
                 ref_min=ref_min, ref_max=ref_max, date=hist_date,
                 section=current_section, is_abnormal=hist_abnormal,
-                raw_value=hist_raw,
+                raw_value=hist_raw, is_critical=hist_critical,
             ))
 
     log.debug("Horizontal parse: %d values from report dated %s", len(results), report_date)
@@ -394,18 +478,33 @@ def _parse_vertical(lines: list[str], report_date: str) -> list[LabValue]:
                             break
 
             # Save the parsed test entry
+            is_textual = False
+            textual_result = ""
             if value is not None:
                 is_abnormal = False
                 if ref_min is not None and value < ref_min:
                     is_abnormal = True
                 if ref_max is not None and value > ref_max:
                     is_abnormal = True
+                is_critical = _check_critical(test_name, value)
+            elif raw_value:
+                # Check for textual results
+                is_textual, textual_result = _check_textual_result(raw_value)
+                is_abnormal = is_textual and textual_result.lower() in (
+                    "pozitif", "positive", "reaktif", "reactive", "anormal", "abnormal"
+                )
+                is_critical = False
+            else:
+                is_abnormal = False
+                is_critical = False
 
+            if value is not None or raw_value:
                 results.append(LabValue(
                     test_name=test_name, value=value, unit=unit,
                     ref_min=ref_min, ref_max=ref_max, date=report_date,
                     section=current_section, is_abnormal=is_abnormal,
-                    raw_value=raw_value,
+                    raw_value=raw_value, is_critical=is_critical,
+                    is_textual=is_textual, textual_result=textual_result,
                 ))
 
                 # Historical values
@@ -419,11 +518,12 @@ def _parse_vertical(lines: list[str], report_date: str) -> list[LabValue]:
                         hist_abnormal = True
                     if ref_max is not None and hist_val > ref_max:
                         hist_abnormal = True
+                    hist_critical = _check_critical(test_name, hist_val)
                     results.append(LabValue(
                         test_name=test_name, value=hist_val, unit=unit,
                         ref_min=ref_min, ref_max=ref_max, date=hist_date,
                         section=current_section, is_abnormal=hist_abnormal,
-                        raw_value=hist_raw,
+                        raw_value=hist_raw, is_critical=hist_critical,
                     ))
 
     log.debug("Vertical parse: %d values from report dated %s", len(results), report_date)
@@ -479,18 +579,33 @@ def aggregate_trends(
                 all_values[key] = []
             all_values[key].append(v)
 
-    # Sort each test's values by date and convert to dicts
+    # Sort each test's values by date, compute deltas, convert to dicts
     result: dict[str, list[dict[str, Any]]] = {}
     for test_name, values in sorted(all_values.items()):
         sorted_vals = sorted(values, key=lambda v: v.date)
+
+        # Compute delta (change from previous value) for each entry
+        for idx in range(len(sorted_vals)):
+            if idx > 0 and sorted_vals[idx].value is not None and sorted_vals[idx - 1].value is not None:
+                prev_val = sorted_vals[idx - 1].value
+                curr_val = sorted_vals[idx].value
+                sorted_vals[idx].delta = round(curr_val - prev_val, 4)
+                if prev_val != 0:
+                    sorted_vals[idx].delta_pct = round(
+                        ((curr_val - prev_val) / abs(prev_val)) * 100, 2
+                    )
+
         result[test_name] = [v.to_dict() for v in sorted_vals]
 
     # Build abnormal summary: tests where the most recent value is abnormal
     abnormal_summary: list[dict[str, Any]] = []
+    critical_summary: list[dict[str, Any]] = []
     for test_name, values in result.items():
-        if values and values[-1].get("is_abnormal"):
-            latest = values[-1]
-            abnormal_summary.append({
+        if not values or test_name.startswith("_"):
+            continue
+        latest = values[-1]
+        if latest.get("is_abnormal"):
+            entry = {
                 "test_name": test_name,
                 "value": latest.get("value"),
                 "unit": latest.get("unit", ""),
@@ -498,14 +613,23 @@ def aggregate_trends(
                 "ref_max": latest.get("ref_max"),
                 "date": latest.get("date", ""),
                 "section": latest.get("section", ""),
-            })
+                "delta": latest.get("delta"),
+                "delta_pct": latest.get("delta_pct"),
+                "is_critical": latest.get("is_critical", False),
+                "is_textual": latest.get("is_textual", False),
+                "textual_result": latest.get("textual_result", ""),
+            }
+            abnormal_summary.append(entry)
+            if latest.get("is_critical"):
+                critical_summary.append(entry)
 
     result["_abnormal_summary"] = abnormal_summary
+    result["_critical_summary"] = critical_summary
     result["_lab_reports_parsed"] = [{"count": lab_count}]
 
     log.info(
-        "Aggregated trends: %d unique tests from %d lab reports, %d currently abnormal",
-        len(all_values), lab_count, len(abnormal_summary),
+        "Aggregated trends: %d unique tests from %d lab reports, %d abnormal, %d critical",
+        len(all_values), lab_count, len(abnormal_summary), len(critical_summary),
     )
 
     return result

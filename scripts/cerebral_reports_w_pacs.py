@@ -693,8 +693,8 @@ def download_all_reports(protocol_no, output_dir=None, max_workers=10):
             else:
                 text = ""
 
-            # Extract accession number for radiology (stored in manifest, NOT in file)
-            if meta.get("ReportTypeSwc") == "X" and text:
+            # Extract accession number from report text (any type, not just radiology)
+            if text:
                 acc_no = extract_accession_number(text)
                 if acc_no:
                     entry["accession_number"] = acc_no

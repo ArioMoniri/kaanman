@@ -29,6 +29,7 @@ from src.backend.tools.reports import (
     get_reports_dir,
     reports_exist,
     get_fresh_pacs_link,
+    get_pacs_links,
     refresh_all_pacs_links,
 )
 from src.backend.tools.reports_rag import (
@@ -111,6 +112,7 @@ async def chat(req: ChatRequest):
         "language": result.language,
         "priority_country": result.priority_country,
         "izlem_brief_pdf": result.izlem_brief_pdf,
+        "prescription_data": result.prescription_data.model_dump() if result.prescription_data else None,
     })
 
     return ChatResponse(session_id=session_id, **result.model_dump())
@@ -153,6 +155,7 @@ async def chat_stream(req: ChatRequest):
                 "language": result.language,
                 "priority_country": result.priority_country,
                 "izlem_brief_pdf": result.izlem_brief_pdf,
+                "prescription_data": result.prescription_data.model_dump() if result.prescription_data else None,
             })
             resp = ChatResponse(session_id=session_id, **result.model_dump())
             await status_queue.put({"_type": "result", "data": resp.model_dump()})
@@ -534,21 +537,128 @@ async def get_pacs_link_endpoint(protocol_id: str, req: PacsLinkRequest):
     """Generate a fresh PACS link for a specific report or all studies.
 
     If accession_number is provided, generates a show_study link.
-    If only report_id is provided, looks up the accession number from manifest.
+    If only report_id is provided, looks up the accession number from manifest
+    and tries to extract it from the report text file as a fallback.
     If neither, generates an all-studies link.
     """
-    acc_no = req.accession_number
+    import re
+    import logging
+    pacs_log = logging.getLogger("cerebralink.pacs")
 
-    # If report_id provided but no accession_number, look it up from manifest
+    acc_no = req.accession_number
+    pacs_log.info(
+        "PACS link request: protocol=%s report_id=%s accession_number=%s",
+        protocol_id, req.report_id, req.accession_number,
+    )
+
+    # If report_id provided but no accession_number, look it up from pacs_links.json first, then manifest
     if req.report_id and not acc_no:
-        manifest = get_manifest(protocol_id)
-        if manifest:
-            for entry in manifest:
-                if str(entry.get("report_id")) == str(req.report_id):
-                    acc_no = entry.get("accession_number")
+        # Try pacs_links.json first — it has pre-extracted accession numbers from the download script
+        pacs_links_data = get_pacs_links(protocol_id)
+        if pacs_links_data and pacs_links_data.get("studies"):
+            for study in pacs_links_data["studies"]:
+                if str(study.get("report_id")) == str(req.report_id) and study.get("accession_number"):
+                    acc_no = study["accession_number"]
+                    pacs_log.info(
+                        "Found accession in pacs_links.json: report_id=%s accession=%s",
+                        req.report_id, acc_no,
+                    )
                     break
 
+        # Fallback: look up in manifest
+        manifest = get_manifest(protocol_id)
+        pacs_log.info(
+            "Looking up accession in manifest: manifest_exists=%s entries=%d pacs_links_hit=%s",
+            manifest is not None, len(manifest) if manifest else 0, bool(acc_no),
+        )
+        if manifest and not acc_no:
+            found_entry = False
+            for entry in manifest:
+                if str(entry.get("report_id")) == str(req.report_id):
+                    found_entry = True
+                    acc_no = entry.get("accession_number")
+                    pacs_log.info(
+                        "Found manifest entry: report_id=%s report_type=%s accession=%s text_file=%s",
+                        entry.get("report_id"), entry.get("report_type"),
+                        acc_no, entry.get("text_file"),
+                    )
+                    # If accession still missing, try to extract from report text file
+                    if not acc_no and entry.get("text_file"):
+                        try:
+                            text_path = get_reports_dir(protocol_id) / entry["text_file"]
+                            pacs_log.info(
+                                "Trying text extraction: path=%s exists=%s",
+                                text_path, text_path.exists(),
+                            )
+                            if text_path.exists():
+                                text = text_path.read_text(encoding="utf-8")[:3000]
+                                for pattern in [
+                                    r'Eri[sş]im\s+Numaras[ıi]\s*[:=]\s*(\d+)',
+                                    r'Accession\s*(?:No|Number|#|ID)?\s*[:=]\s*(\d+)',
+                                    r'Eri[sş]im\s+No\s*[:=]\s*(\d+)',
+                                    r'AccessionNumber\s*[:=]\s*(\d+)',
+                                    r'Erisim\s*[:=]\s*(\d+)',
+                                ]:
+                                    m = re.search(pattern, text, re.IGNORECASE)
+                                    if m:
+                                        acc_no = m.group(1)
+                                        entry["accession_number"] = acc_no
+                                        pacs_log.info(
+                                            "Extracted accession from text: %s", acc_no,
+                                        )
+                                        break
+                                if not acc_no:
+                                    # Also try the PDF file itself if it exists
+                                    pdf_file = entry.get("file")
+                                    if pdf_file:
+                                        pdf_path = get_reports_dir(protocol_id) / pdf_file
+                                        if pdf_path.exists():
+                                            try:
+                                                import fitz
+                                                pdf_doc = fitz.open(str(pdf_path))
+                                                pdf_text = ""
+                                                for page in pdf_doc[:3]:
+                                                    pdf_text += page.get_text()
+                                                pdf_doc.close()
+                                                for pattern in [
+                                                    r'Eri[sş]im\s+Numaras[ıi]\s*[:=]\s*(\d+)',
+                                                    r'Accession\s*(?:No|Number|#|ID)?\s*[:=]\s*(\d+)',
+                                                ]:
+                                                    m = re.search(pattern, pdf_text, re.IGNORECASE)
+                                                    if m:
+                                                        acc_no = m.group(1)
+                                                        entry["accession_number"] = acc_no
+                                                        pacs_log.info(
+                                                            "Extracted accession from PDF: %s", acc_no,
+                                                        )
+                                                        break
+                                            except Exception as e:
+                                                pacs_log.debug("PDF text extraction failed: %s", e)
+                                if not acc_no:
+                                    pacs_log.info(
+                                        "No accession found in text. report_type_swc=%s First 200 chars: %s",
+                                        entry.get("report_type_swc", "?"),
+                                        text[:200].replace("\n", " "),
+                                    )
+                        except Exception as e:
+                            pacs_log.warning(
+                                "Text extraction failed: %s", e, exc_info=True,
+                            )
+                    break
+            if not found_entry:
+                pacs_log.warning(
+                    "No manifest entry matched report_id=%s. Available IDs: %s",
+                    req.report_id,
+                    [e.get("report_id") for e in manifest[:10]],
+                )
+    elif not req.report_id and not acc_no:
+        pacs_log.info("No report_id or accession — generating all-studies link")
+
     link = get_fresh_pacs_link(protocol_id, acc_no)
+    pacs_log.info(
+        "PACS link generated: cmd=%s accession=%s url_len=%d",
+        link.get("uniview_cmd"), link.get("accession_number"), len(link.get("url", "")),
+    )
     return {
         "success": True,
         "protocol_id": protocol_id,

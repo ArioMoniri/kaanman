@@ -31,6 +31,18 @@ class Citation(BaseModel):
     evidence_level: str | None = None    # e.g. "Level A", "Grade I", "1a"
 
 
+class BrandOption(BaseModel):
+    ingredient: str
+    brands: list[str] = []
+    atc: str = ""
+
+
+class PrescriptionData(BaseModel):
+    prescription: str = ""
+    brand_options: list[BrandOption] = []
+    country: str = ""
+
+
 class AgentTiming(BaseModel):
     agent: str
     time_ms: int
@@ -96,6 +108,7 @@ class ChatResponse(BaseModel):
     priority_country: str = ""
     patient_context: dict | None = None
     izlem_brief_pdf: str | None = None  # Path to generated izlem PDF brief
+    prescription_data: PrescriptionData | None = None
 
 
 class PatientIngestRequest(BaseModel):

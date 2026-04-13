@@ -57,8 +57,19 @@ Return ONLY valid JSON with this structure:
         query: str,
         agent_outputs: dict[str, Any],
         patient_context: dict[str, Any] | None = None,
+        language: str = "en",
     ) -> dict[str, Any] | None:
+        lang_names = {
+            "tr": "Turkish (Türkçe)", "en": "English", "de": "German",
+            "fr": "French", "es": "Spanish", "ar": "Arabic",
+        }
+        lang_name = lang_names.get(language, language)
         parts = [f"CLINICAL QUESTION: {query}"]
+        parts.append(
+            f"\nLANGUAGE: {language} — ALL node labels, edge labels, and the title "
+            f"MUST be written in {lang_name}. Do NOT use English unless the question "
+            f"is in English."
+        )
 
         if patient_context:
             parts.append("[Patient context available — include patient-specific branches]")
@@ -72,7 +83,8 @@ Return ONLY valid JSON with this structure:
                 content = content[:2000]
             parts.append(f"\n--- {name.upper()} OUTPUT ---\n{content}")
 
-        parts.append("\nGenerate a clinical decision tree for this scenario.")
+        parts.append(f"\nGenerate a clinical decision tree for this scenario. "
+                      f"ALL text in the tree must be in {lang_name}.")
 
         try:
             result = await self.call_json("\n".join(parts))

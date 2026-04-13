@@ -130,6 +130,8 @@ export function ReportViewer({
         pacsRefreshTimeRef.current = Date.now();
         setPacsLinkAge(0);
         setPacsLinkReady(true);
+        // Only open per-study link if backend found an accession number
+        // This ensures we open the specific study, not all-studies
         window.open(data.url, "_blank", "noopener");
       }
     } catch {

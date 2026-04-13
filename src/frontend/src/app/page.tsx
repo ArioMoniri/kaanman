@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { ChatInput } from "@/components/chat-input";
-import { MessageBubble, type Message, type DeepLinkEntity } from "@/components/message-bubble";
+import { MessageBubble, type Message, type DeepLinkEntity, type PrescriptionData } from "@/components/message-bubble";
 import { PatientBanner } from "@/components/patient-banner";
 import { StatusBar } from "@/components/status-bar";
 import { ReferenceSidebar } from "@/components/reference-sidebar";
@@ -12,7 +12,7 @@ import { ReferenceLegend } from "@/components/reference-legend";
 import { ShimmerText } from "@/components/ui/shimmer-text";
 import { CerebraLinkLogo } from "@/components/ui/cerebralink-logo";
 import { LampBar } from "@/components/ui/lamp-bar";
-import { AgentLogo } from "@/components/ui/agent-logo";
+import { AgentLogo, resetAvatarSeed } from "@/components/ui/agent-logo";
 import { ReportViewer } from "@/components/report-viewer";
 import { TrendMonitor } from "@/components/trend-monitor";
 import { ContextWindowBar } from "@/components/context-window-bar";
@@ -104,6 +104,8 @@ interface HistoryEntry {
   timestamp: number;
   messageCount: number;
   firstQuery: string;
+  /** Concatenated message content for full-text search across all chat history */
+  searchText?: string;
 }
 
 /** Extract entity names from patient data for Obsidian-style deep links */
@@ -185,6 +187,97 @@ function extractPatientEntities(data: Record<string, unknown> | null): DeepLinkE
   return entities;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Self-improving entity learning — persists across patients/sessions */
+/* ------------------------------------------------------------------ */
+
+const ENTITY_LEARN_KEY = "cerebralink_entity_learn";
+
+interface LearnedEntity {
+  text: string;
+  category: string;
+  label: string;
+  seenCount: number;
+  lastSeen: number; // timestamp
+}
+
+/** Load learned entities from localStorage */
+function loadLearnedEntities(): Map<string, LearnedEntity> {
+  try {
+    const raw = localStorage.getItem(ENTITY_LEARN_KEY);
+    if (!raw) return new Map();
+    const arr: LearnedEntity[] = JSON.parse(raw);
+    const map = new Map<string, LearnedEntity>();
+    for (const e of arr) map.set(e.text.toLowerCase(), e);
+    return map;
+  } catch { return new Map(); }
+}
+
+/** Save learned entities to localStorage */
+function saveLearnedEntities(map: Map<string, LearnedEntity>) {
+  try {
+    // Keep top 500 by seenCount, prune old ones
+    const arr = Array.from(map.values())
+      .sort((a, b) => b.seenCount - a.seenCount)
+      .slice(0, 500);
+    localStorage.setItem(ENTITY_LEARN_KEY, JSON.stringify(arr));
+  } catch { /* quota exceeded */ }
+}
+
+/** Learn entities from new patient data — merges with existing knowledge */
+function learnFromPatientData(entities: DeepLinkEntity[]) {
+  const learned = loadLearnedEntities();
+  const now = Date.now();
+  let changed = false;
+
+  for (const ent of entities) {
+    const key = ent.text.toLowerCase();
+    if (key.length < 3) continue;
+    const existing = learned.get(key);
+    if (existing) {
+      existing.seenCount++;
+      existing.lastSeen = now;
+      // Upgrade category if we see a more specific one
+      if (ent.category !== "episode" && existing.category === "episode") {
+        existing.category = ent.category;
+        existing.label = ent.label;
+      }
+    } else {
+      learned.set(key, {
+        text: ent.text,
+        category: ent.category,
+        label: ent.label,
+        seenCount: 1,
+        lastSeen: now,
+      });
+    }
+    changed = true;
+  }
+
+  if (changed) saveLearnedEntities(learned);
+}
+
+/** Enhance entities with learned patterns from previous patients */
+function enhanceWithLearnedEntities(entities: DeepLinkEntity[]): DeepLinkEntity[] {
+  const learned = loadLearnedEntities();
+  if (learned.size === 0) return entities;
+
+  const existing = new Set(entities.map(e => e.text.toLowerCase()));
+  const enhanced = [...entities];
+
+  // Add frequently-seen entities (seenCount >= 2) that aren't already present
+  // These are patterns learned from previous patients
+  for (const [key, le] of Array.from(learned.entries())) {
+    if (existing.has(key)) continue;
+    if (le.seenCount >= 2 && le.category !== "episode") {
+      // Only add non-date entities that have been seen in 2+ patients
+      enhanced.push({ text: le.text, category: le.category, label: le.label });
+    }
+  }
+
+  return enhanced;
+}
+
 const HISTORY_KEY = "cerebralink_history";
 
 function loadHistory(): HistoryEntry[] {
@@ -211,16 +304,65 @@ function upsertHistory(entry: HistoryEntry) {
   saveHistory(existing);
 }
 
-/* History drawer component */
+/* History drawer component with full-text search */
 function HistoryDrawer({ onClose, onRestore }: { onClose: () => void; onRestore: (entry: HistoryEntry) => void }) {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { setEntries(loadHistory()); }, []);
+  useEffect(() => {
+    setEntries(loadHistory());
+    setTimeout(() => searchInputRef.current?.focus(), 100);
+  }, []);
 
-  const handleDelete = (sessionId: string) => {
-    const updated = entries.filter((e) => e.sessionId !== sessionId);
+  const handleDelete = (sid: string) => {
+    const updated = entries.filter((e) => e.sessionId !== sid);
     saveHistory(updated);
     setEntries(updated);
+  };
+
+  // Filter entries by search query across all searchable fields
+  const filtered = useMemo(() => {
+    if (!searchQuery.trim()) return entries;
+    const q = searchQuery.toLowerCase();
+    const terms = q.split(/\s+/).filter((t) => t.length >= 2);
+    return entries.filter((entry) => {
+      const haystack = [
+        entry.patientName || "",
+        entry.protocolNumber || "",
+        entry.firstQuery || "",
+        entry.searchText || "",
+      ].join(" ").toLowerCase();
+      return terms.every((term) => haystack.includes(term));
+    });
+  }, [entries, searchQuery]);
+
+  /** Highlight matching text in a string */
+  const highlight = (text: string) => {
+    if (!searchQuery.trim() || !text) return text;
+    const terms = searchQuery.toLowerCase().split(/\s+/).filter((t) => t.length >= 2);
+    if (terms.length === 0) return text;
+    const pattern = new RegExp(`(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "gi");
+    const parts = text.split(pattern);
+    return parts.map((part, i) =>
+      terms.some((t) => part.toLowerCase() === t)
+        ? <mark key={i} style={{ background: "rgba(129,140,248,0.25)", color: "#e0e7ff", borderRadius: 2, padding: "0 1px" }}>{part}</mark>
+        : part
+    );
+  };
+
+  /** Find matching snippet from searchText to show context */
+  const getMatchSnippet = (entry: HistoryEntry): string | null => {
+    if (!searchQuery.trim() || !entry.searchText) return null;
+    const q = searchQuery.toLowerCase();
+    const idx = entry.searchText.toLowerCase().indexOf(q);
+    if (idx < 0) return null;
+    const start = Math.max(0, idx - 40);
+    const end = Math.min(entry.searchText.length, idx + q.length + 60);
+    let snippet = entry.searchText.slice(start, end).trim();
+    if (start > 0) snippet = "..." + snippet;
+    if (end < entry.searchText.length) snippet += "...";
+    return snippet;
   };
 
   return (
@@ -239,6 +381,37 @@ function HistoryDrawer({ onClose, onRestore }: { onClose: () => void; onRestore:
           <button onClick={onClose} className="text-gray-500 hover:text-gray-200 text-lg px-2 py-1 rounded hover:bg-white/5">&times;</button>
         </div>
 
+        {/* Search bar */}
+        <div className="px-4 py-3 border-b border-white/5">
+          <div className="relative">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+              className="absolute left-3 top-1/2 -translate-y-1/2">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search chats by patient, protocol, content..."
+              className="w-full pl-9 pr-8 py-2 text-sm text-gray-200 rounded-lg border border-white/10 bg-white/[0.03] placeholder-gray-600 outline-none focus:border-indigo-500/50 focus:bg-white/[0.05] transition-all"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-300 text-sm px-1"
+              >
+                &times;
+              </button>
+            )}
+          </div>
+          {searchQuery && (
+            <div className="text-[10px] text-gray-600 mt-1.5 px-1">
+              {filtered.length} of {entries.length} sessions match
+            </div>
+          )}
+        </div>
+
         {/* List */}
         <div className="flex-1 overflow-y-auto">
           {entries.length === 0 ? (
@@ -246,37 +419,54 @@ function HistoryDrawer({ onClose, onRestore }: { onClose: () => void; onRestore:
               <div className="text-gray-600 text-sm">No previous sessions</div>
               <div className="text-gray-700 text-xs mt-1">Past patient conversations will appear here</div>
             </div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-64 text-center p-6">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-3">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <div className="text-gray-600 text-sm">No matching chats found</div>
+              <div className="text-gray-700 text-xs mt-1">Try different keywords</div>
+            </div>
           ) : (
-            entries.map((entry) => (
-              <div
-                key={entry.sessionId}
-                className="px-5 py-3 border-b border-white/5 hover:bg-white/[0.03] transition-colors cursor-pointer group"
-                onClick={() => onRestore(entry)}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-gray-200 truncate">
-                      {entry.patientName || "Unknown Patient"}
+            filtered.map((entry) => {
+              const snippet = getMatchSnippet(entry);
+              return (
+                <div
+                  key={entry.sessionId}
+                  className="px-5 py-3 border-b border-white/5 hover:bg-white/[0.03] transition-colors cursor-pointer group"
+                  onClick={() => onRestore(entry)}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-gray-200 truncate">
+                        {highlight(entry.patientName || "Unknown Patient")}
+                      </div>
+                      {entry.protocolNumber && (
+                        <div className="text-xs text-indigo-400/80 mt-0.5">Protocol: {highlight(entry.protocolNumber)}</div>
+                      )}
+                      <div className="text-xs text-gray-500 mt-1 truncate">{highlight(entry.firstQuery)}</div>
+                      {/* Search context snippet */}
+                      {snippet && (
+                        <div className="text-[11px] text-gray-500 mt-1.5 leading-relaxed line-clamp-2 bg-white/[0.02] rounded px-2 py-1 border-l-2 border-indigo-500/30">
+                          {highlight(snippet)}
+                        </div>
+                      )}
+                      <div className="flex items-center gap-3 mt-1.5">
+                        <span className="text-[10px] text-gray-600">{new Date(entry.timestamp).toLocaleDateString()}</span>
+                        <span className="text-[10px] text-gray-600">{entry.messageCount} messages</span>
+                      </div>
                     </div>
-                    {entry.protocolNumber && (
-                      <div className="text-xs text-indigo-400/80 mt-0.5">Protocol: {entry.protocolNumber}</div>
-                    )}
-                    <div className="text-xs text-gray-500 mt-1 truncate">{entry.firstQuery}</div>
-                    <div className="flex items-center gap-3 mt-1.5">
-                      <span className="text-[10px] text-gray-600">{new Date(entry.timestamp).toLocaleDateString()}</span>
-                      <span className="text-[10px] text-gray-600">{entry.messageCount} messages</span>
-                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDelete(entry.sessionId); }}
+                      className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 text-xs px-1.5 py-0.5 rounded transition-all"
+                      title="Remove from history"
+                    >
+                      &times;
+                    </button>
                   </div>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleDelete(entry.sessionId); }}
-                    className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 text-xs px-1.5 py-0.5 rounded transition-all"
-                    title="Remove from history"
-                  >
-                    &times;
-                  </button>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
@@ -322,7 +512,13 @@ export default function Home() {
   const [episodeManifest, setEpisodeManifest] = useState<EpisodeEntry[] | null>(null);
 
   // Patient entities for Obsidian-style deep links
-  const patientEntities = useMemo(() => extractPatientEntities(patientData), [patientData]);
+  const patientEntities = useMemo(() => {
+    const base = extractPatientEntities(patientData);
+    // Learn from this patient's data (persists across patients/sessions)
+    if (base.length > 0) learnFromPatientData(base);
+    // Enhance with patterns learned from previous patients
+    return enhanceWithLearnedEntities(base);
+  }, [patientData]);
 
   // Abort controller for cancelling requests
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -435,20 +631,22 @@ export default function Home() {
         ((patientData as Record<string, unknown>)?.patient_id as string) ||
         (((patientData as Record<string, unknown>)?.patient as Record<string, unknown>)?.patient_id as string) ||
         "";
-      if (entry.accession_number && pid) {
-        // Generate fresh per-study PACS link and open directly
+      if (pid) {
+        // Always try to generate a fresh per-study PACS link via backend.
+        // Backend will look up accession_number from manifest/text if not provided.
         try {
           const resp = await fetch(`${API_URL}/api/reports/${pid}/pacs/link`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              report_id: entry.report_id || null,
-              accession_number: entry.accession_number,
+              report_id: entry.report_id ? String(entry.report_id) : null,
+              accession_number: entry.accession_number || null,
             }),
           });
           if (resp.ok) {
             const data = await resp.json();
-            if (data.url) {
+            if (data.url && data.accession_number) {
+              // Per-study link with accession number — open directly
               window.open(data.url, "_blank", "noopener");
               return;
             }
@@ -457,9 +655,11 @@ export default function Home() {
           // Fall through to fallback
         }
       }
-      if (entry.pacs_url) {
+      // Fallback: use pre-generated per-study URL if available
+      if (entry.pacs_url && entry.accession_number) {
         window.open(entry.pacs_url, "_blank", "noopener,noreferrer");
       } else if (pacsAllStudies) {
+        // Last resort: open all-studies view
         window.open(pacsAllStudies, "_blank", "noopener,noreferrer");
       }
     },
@@ -604,6 +804,7 @@ export default function Home() {
                   fast_answer: data.fast_answer,
                   guidelines_used: data.guidelines_used,
                   citations: data.citations,
+                  prescription_data: data.prescription_data || undefined,
                   timestamp: Date.now(),
                 };
                 setMessages((prev) => [...prev, fastMsg]);
@@ -644,6 +845,7 @@ export default function Home() {
                   language: data.language,
                   priority_country: data.priority_country,
                   izlem_brief_pdf: data.izlem_brief_pdf,
+                  prescription_data: data.prescription_data || undefined,
                   timestamp: Date.now(),
                 };
 
@@ -653,7 +855,15 @@ export default function Home() {
                     const idx = prev.findIndex((m) => m.id === pendingId);
                     if (idx >= 0) {
                       const next = [...prev];
-                      next[idx] = fullMsg;
+                      // Preserve citations/guidelines from fast_answer if result has none
+                      const merged = { ...fullMsg };
+                      if ((!merged.citations || merged.citations.length === 0) && prev[idx].citations && prev[idx].citations!.length > 0) {
+                        merged.citations = prev[idx].citations;
+                      }
+                      if ((!merged.guidelines_used || merged.guidelines_used.length === 0) && prev[idx].guidelines_used && prev[idx].guidelines_used!.length > 0) {
+                        merged.guidelines_used = prev[idx].guidelines_used;
+                      }
+                      next[idx] = merged;
                       return next;
                     }
                   }
@@ -665,7 +875,15 @@ export default function Home() {
                       !prev[i].complete_answer
                     ) {
                       const next = [...prev];
-                      next[i] = { ...fullMsg, id: prev[i].id };
+                      // Preserve citations/guidelines from fast_answer if result has none
+                      const merged = { ...fullMsg, id: prev[i].id };
+                      if ((!merged.citations || merged.citations.length === 0) && prev[i].citations && prev[i].citations!.length > 0) {
+                        merged.citations = prev[i].citations;
+                      }
+                      if ((!merged.guidelines_used || merged.guidelines_used.length === 0) && prev[i].guidelines_used && prev[i].guidelines_used!.length > 0) {
+                        merged.guidelines_used = prev[i].guidelines_used;
+                      }
+                      next[i] = merged;
                       return next;
                     }
                   }
@@ -714,6 +932,7 @@ export default function Home() {
         method: "POST",
       }).catch(() => {});
     }
+    resetAvatarSeed(); // new avatar face for each new chat
     setPatientSummary(null);
     setPatientData(null);
     setSessionId(null);
@@ -842,6 +1061,12 @@ export default function Home() {
       (patientData as Record<string, unknown>)?.patient_id as string ||
       ((patientData as Record<string, unknown>)?.patient as Record<string, unknown>)?.patient_id as string ||
       null;
+    // Build searchable text from all messages (capped at 3000 chars to fit localStorage)
+    const searchText = messages
+      .map((m) => m.content || "")
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .slice(0, 3000);
     upsertHistory({
       sessionId,
       patientName: patientSummary,
@@ -849,6 +1074,7 @@ export default function Home() {
       timestamp: Date.now(),
       messageCount: messages.length,
       firstQuery: firstUserMsg?.content?.slice(0, 100) || "",
+      searchText,
     });
   }, [sessionId, messages.length, patientSummary, patientData, messages]);
 
@@ -908,6 +1134,7 @@ export default function Home() {
               if (m.language) msg.language = m.language as string;
               if (m.priority_country) msg.priority_country = m.priority_country as string;
               if (m.izlem_brief_pdf) msg.izlem_brief_pdf = m.izlem_brief_pdf as string;
+              if (m.prescription_data) msg.prescription_data = m.prescription_data as PrescriptionData;
             }
             return msg;
           }
